@@ -1,6 +1,7 @@
 // index.js (ESM)
 // package.json に "type": "module" がある前提
 
+import express from "express";
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -1659,3 +1660,12 @@ client.on(Events.ClientReady, async () => {
 });
 
 client.login(TOKEN);
+
+client.login(TOKEN);
+
+const app = express();
+app.get("/", (req, res) => res.send("Bot is running"));
+
+app.listen(3000, () => {
+  console.log("Web server running");
+});
