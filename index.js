@@ -1681,6 +1681,7 @@ client.on(Events.ClientReady, async () => {
   console.log(`DB channel name per guild: #${DB_CHANNEL_NAME}`);
 });
 
+console.log("LOGIN START");
 client.login(TOKEN).catch(e => {
   console.error('client.login failed:', e);
   process.exit(1);
