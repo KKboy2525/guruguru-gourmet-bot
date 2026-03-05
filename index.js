@@ -484,10 +484,13 @@ function searchPanelEmbed(state) {
     const userLabel = state.userIdFilter ? `<@${state.userIdFilter}>` : '(指定なし)';
     const prefLabel = state.prefectureFilter ? state.prefectureFilter : '(指定なし)';
     const keyword = state.keyword ? `"${state.keyword}"` : '(なし)';
+    const ratingLabel = state.ratingFilter ? '⭐'.repeat(state.ratingFilter) : '(指定なし)';
+
     return new EmbedBuilder().setTitle('🔎 検索').setDescription(
         `👤 人フィルター: ${userLabel}\n` +
         `🗾 都道府県: ${prefLabel}\n` +
-        `🔤 キーワード: ${keyword}`
+        `🔤 キーワード: ${keyword}\n` +
+        `⭐ フィルター: ${ratingLabel}`
     );
 }
 
@@ -1038,17 +1041,29 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const results = [...cache.values()]
                     .filter(p => {
+                        // ユーザー指定
                         if (st.userIdFilter && p.created_by !== st.userIdFilter) return false;
+
+                        // 都道府県指定
                         if (st.prefectureFilter) {
                             const pp = (p.prefecture ?? '').trim();
                             if (pp !== st.prefectureFilter) return false;
                         }
+
+                        // キーワード指定
                         if (kw) {
                             const hay = [p.name ?? '', p.comment ?? '', p.prefecture ?? '', ...(p.tags ?? [])]
                                 .join('\n')
                                 .toLowerCase();
                             if (!hay.includes(kw)) return false;
                         }
+
+                        // ⭐評価指定
+                        if (st.ratingFilter) {
+                            const r = Number(st.ratingFilter);
+                            if (Number(p.rating) !== r) return false;
+                        }
+
                         return true;
                     })
                     .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
@@ -1081,7 +1096,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 searchState.set(k, st);
 
                 return interaction.update({
-                    content: `⭐${rating} フィルターを設定しました`,
                     embeds: [searchPanelEmbed(st)],
                     components: searchPanelComponents(guildId, userId),
                 });
