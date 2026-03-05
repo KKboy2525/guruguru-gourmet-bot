@@ -65,7 +65,7 @@ const cacheReadyByGuild = new Map();
 const draftRating = new Map();
 
 // 検索状態 key: guildId:userId
-// { userIdFilter?:string|null, prefectureFilter?:string|null, keyword?:string, results?:string[], idx?:number }
+// { userIdFilter?:string[]|null, prefectureFilter?:string|null, keyword?:string, results?:string[], idx?:number }
 const searchState = new Map();
 
 // 自分の記録（カード一覧）状態 key: guildId:userId
@@ -481,7 +481,9 @@ function prefPickComponents(mode, guildId, userId, page = 0) {
 }
 
 function searchPanelEmbed(state) {
-    const userLabel = state.userIdFilter ? `<@${state.userIdFilter}>` : '(指定なし)';
+    const userLabel = state.userIdFilter?.length
+  ? state.userIdFilter.map(id => `<@${id}>`).join(' ')
+  : '(指定なし)';
     const prefLabel = state.prefectureFilter ? state.prefectureFilter : '(指定なし)';
     const keyword = state.keyword ? `"${state.keyword}"` : '(なし)';
     const ratingLabel = state.ratingFilter ? '⭐'.repeat(state.ratingFilter) : '(指定なし)';
@@ -511,7 +513,7 @@ function searchPanelComponents(guildId, userId) {
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`search:run:${guildId}:${userId}`).setLabel('✅ 検索実行').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`search:clear:${guildId}:${userId}`).setLabel('🧹 クリア').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`search:back:${guildId}:${userId}`).setLabel('🏠 戻る').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId(`search:back:${guildId}:${userId}`).setLabel('🏠 ホーム').setStyle(ButtonStyle.Secondary)
         ),
     ];
 }
@@ -562,7 +564,7 @@ function mineListComponents(guildId, userId, page, hasPrev, hasNext, options) {
                 .setCustomId(`mine:pick:${guildId}:${userId}:${page}`)
                 .setPlaceholder('お店を選んで詳細へ')
                 .setMinValues(1)
-                .setMaxValues(1)
+                .setMaxValues(30)
                 .addOptions(options?.length ? options : [{ label: '(なし)', value: 'none', description: '選択できません' }])
         ),
         new ActionRowBuilder().addComponents(
@@ -1042,7 +1044,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const results = [...cache.values()]
                     .filter(p => {
                         // ユーザー指定
-                        if (st.userIdFilter && p.created_by !== st.userIdFilter) return false;
+                        const userLabel = state.userIdFilter ? `<@${state.userIdFilter}>` : '(指定なし)';
 
                         // 都道府県指定
                         if (st.prefectureFilter) {
@@ -1378,7 +1380,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
             return interaction.reply({
                 ephemeral: true,
-                content: picked ? `人フィルタを <@${picked}> にしました。` : '人フィルタを解除しました。',
                 embeds: [searchPanelEmbed(st)],
                 components: searchPanelComponents(guildId, userId),
             });
