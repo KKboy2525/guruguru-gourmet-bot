@@ -5,7 +5,10 @@ dotenv.config();
 
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) throw new Error('DISCORD_TOKEN is required');
-
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Web server running on port", PORT);
+});
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, () => {
