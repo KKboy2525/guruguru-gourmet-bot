@@ -10,6 +10,8 @@
   "author": "",
   "license": "ISC",
   "type": "module",
+  "engines": {
+  "node": "20.x"},
   "dependencies": {
     "discord.js": "^14.25.1",
     "dotenv": "^17.3.1",
