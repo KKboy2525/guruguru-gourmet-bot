@@ -6,10 +6,10 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 process.on('unhandledRejection', (reason) => {
-  console.error('unhandledRejection:', reason);
+    console.error('unhandledRejection:', reason);
 });
 process.on('uncaughtException', (err) => {
-  console.error('uncaughtException:', err);
+    console.error('uncaughtException:', err);
 });
 
 import {
@@ -499,6 +499,13 @@ function searchPanelComponents(guildId, userId) {
             new ButtonBuilder().setCustomId(`search:setText:${guildId}:${userId}`).setLabel('🔤 キーワード入力').setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:1`).setLabel('⭐1').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:2`).setLabel('⭐2').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:3`).setLabel('⭐3').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:4`).setLabel('⭐4').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:5`).setLabel('⭐5').setStyle(ButtonStyle.Secondary)
+        ),
+        new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`search:run:${guildId}:${userId}`).setLabel('✅ 検索実行').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`search:clear:${guildId}:${userId}`).setLabel('🧹 クリア').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId(`search:back:${guildId}:${userId}`).setLabel('🏠 戻る').setStyle(ButtonStyle.Secondary)
@@ -565,22 +572,22 @@ function mineListComponents(guildId, userId, page, hasPrev, hasNext, options) {
 
 // ====== コマンド登録 ======
 async function registerCommands() {
-  const cmd = new SlashCommandBuilder()
-    .setName('gourmet')
-    .setDescription('グルメ記録を開く');
+    const cmd = new SlashCommandBuilder()
+        .setName('gourmet')
+        .setDescription('グルメ記録を開く');
 
-  const rest = new REST({ version: '10' }).setToken(TOKEN);
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-  const guilds = await client.guilds.fetch();
+    const guilds = await client.guilds.fetch();
 
-  for (const [, g] of guilds) {
-    await rest.put(
-      Routes.applicationGuildCommands(client.user.id, g.id),
-      { body: [cmd.toJSON()] }
-    );
-  }
+    for (const [, g] of guilds) {
+        await rest.put(
+            Routes.applicationGuildCommands(client.user.id, g.id),
+            { body: [cmd.toJSON()] }
+        );
+    }
 
-  console.log('Commands registered to all current guilds');
+    console.log('Commands registered to all current guilds');
 }
 
 // ====== 画面ヘルパ ======
@@ -1060,6 +1067,24 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 return renderSearchResult(interaction, guildId, userId, { update: false });
+            }
+
+            // ⭐評価フィルター
+            if (id.startsWith('search:setRating:')) {
+                const [, , gid, ownerId, ratingStr] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+
+                const rating = Number(ratingStr);
+                const st = searchState.get(k) ?? { userIdFilter: null, prefectureFilter: null, keyword: '', ratingFilter: null, results: [], idx: 0 };
+                st.ratingFilter = rating;
+                searchState.set(k, st);
+
+                return interaction.update({
+                    content: `⭐${rating} フィルターを設定しました`,
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId),
+                });
             }
 
             // Search result nav
@@ -1669,22 +1694,22 @@ client.on(Events.MessageCreate, async msg => {
 });
 
 client.on(Events.ClientReady, async () => {
-  console.log(`Logged in as ${client.user.tag}`);
+    console.log(`Logged in as ${client.user.tag}`);
 
-  try {
-    await registerCommands();
-    console.log('Commands registered');
-  } catch (e) {
-    console.error('registerCommands failed:', e);
-  }
+    try {
+        await registerCommands();
+        console.log('Commands registered');
+    } catch (e) {
+        console.error('registerCommands failed:', e);
+    }
 
-  console.log(`DB channel name per guild: #${DB_CHANNEL_NAME}`);
+    console.log(`DB channel name per guild: #${DB_CHANNEL_NAME}`);
 });
 
 console.log("LOGIN START");
 client.login(TOKEN).catch(e => {
-  console.error('client.login failed:', e);
-  process.exit(1);
+    console.error('client.login failed:', e);
+    process.exit(1);
 });
 
 const app = express();
@@ -1692,5 +1717,5 @@ app.get("/", (req, res) => res.send("Bot is running"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("Web server running on port", PORT);
+    console.log("Web server running on port", PORT);
 });
