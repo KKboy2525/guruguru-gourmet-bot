@@ -5,6 +5,13 @@ import express from "express";
 import dotenv from 'dotenv';
 dotenv.config();
 
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException:', err);
+});
+
 import {
     Client,
     GatewayIntentBits,
@@ -558,14 +565,22 @@ function mineListComponents(guildId, userId, page, hasPrev, hasNext, options) {
 
 // ====== コマンド登録 ======
 async function registerCommands() {
-    const cmd = new SlashCommandBuilder().setName('gourmet').setDescription('グルメ記録を開く');
-    const rest = new REST({ version: '10' }).setToken(TOKEN);
+  const cmd = new SlashCommandBuilder()
+    .setName('gourmet')
+    .setDescription('グルメ記録を開く');
 
-    const guilds = await client.guilds.fetch();
-    for (const [, g] of guilds) {
-        await rest.put(Routes.applicationGuildCommands(client.user.id, g.id), { body: [cmd.toJSON()] });
-    }
-    console.log('Commands registered to all current guilds');
+  const rest = new REST({ version: '10' }).setToken(TOKEN);
+
+  const guilds = await client.guilds.fetch();
+
+  for (const [, g] of guilds) {
+    await rest.put(
+      Routes.applicationGuildCommands(client.user.id, g.id),
+      { body: [cmd.toJSON()] }
+    );
+  }
+
+  console.log('Commands registered to all current guilds');
 }
 
 // ====== 画面ヘルパ ======
@@ -1654,12 +1669,22 @@ client.on(Events.MessageCreate, async msg => {
 });
 
 client.on(Events.ClientReady, async () => {
-    console.log(`Logged in as ${client.user.tag}`);
+  console.log(`Logged in as ${client.user.tag}`);
+
+  try {
     await registerCommands();
-    console.log(`DB channel name per guild: #${DB_CHANNEL_NAME}`);
+    console.log('Commands registered');
+  } catch (e) {
+    console.error('registerCommands failed:', e);
+  }
+
+  console.log(`DB channel name per guild: #${DB_CHANNEL_NAME}`);
 });
 
-client.login(TOKEN);
+client.login(TOKEN).catch(e => {
+  console.error('client.login failed:', e);
+  process.exit(1);
+});
 
 const app = express();
 app.get("/", (req, res) => res.send("Bot is running"));
