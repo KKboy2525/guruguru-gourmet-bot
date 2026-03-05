@@ -1672,8 +1672,8 @@ client.on(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   try {
-    //await registerCommands();
-    //console.log('Commands registered');
+    await registerCommands();
+    console.log('Commands registered');
   } catch (e) {
     console.error('registerCommands failed:', e);
   }
