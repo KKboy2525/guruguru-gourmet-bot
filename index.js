@@ -485,7 +485,7 @@ function searchPanelEmbed(state) {
   ? state.userIdFilter.map(id => `<@${id}>`).join(' ')
   : '(指定なし)';
     const prefLabel = state.prefectureFilter ? state.prefectureFilter : '(指定なし)';
-    const keyword = state.keyword ? `"${state.keyword}"` : '(なし)';
+    const keyword = state.keyword ? `"${state.keyword}"` : '(指定なし)';
     const ratingLabel = state.ratingFilter ? '⭐'.repeat(state.ratingFilter) : '(指定なし)';
 
     return new EmbedBuilder().setTitle('🔎 検索').setDescription(
@@ -564,7 +564,7 @@ function mineListComponents(guildId, userId, page, hasPrev, hasNext, options) {
                 .setCustomId(`mine:pick:${guildId}:${userId}:${page}`)
                 .setPlaceholder('お店を選んで詳細へ')
                 .setMinValues(1)
-                .setMaxValues(30)
+                .setMaxValues(1)
                 .addOptions(options?.length ? options : [{ label: '(なし)', value: 'none', description: '選択できません' }])
         ),
         new ActionRowBuilder().addComponents(
@@ -941,13 +941,12 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-                const row = new ActionRowBuilder().addComponents(
-                    new UserSelectMenuBuilder()
-                        .setCustomId(`search:userPick:${guildId}:${ownerId}`)
-                        .setPlaceholder('人を選んでください（任意）')
-                        .setMinValues(0)
-                        .setMaxValues(1)
-                );
+                new UserSelectMenuBuilder()
+  .setCustomId(`search:userPick:${guildId}:${ownerId}`)
+  .setPlaceholder('人を選んでください（任意・複数OK）')
+  .setMinValues(0)
+  .setMaxValues(25)
+
                 return interaction.reply({ ephemeral: true, content: '人を選んでね（未選択もOK）', components: [row] });
             }
 
@@ -1044,7 +1043,36 @@ client.on(Events.InteractionCreate, async interaction => {
                 const results = [...cache.values()]
                     .filter(p => {
                         // ユーザー指定
-                        const userLabel = state.userIdFilter ? `<@${state.userIdFilter}>` : '(指定なし)';
+                        const results = [...cache.values()]
+  .filter(p => {
+    // 👤 ユーザー指定（複数）
+    if (st.userIdFilter?.length) {
+      if (!st.userIdFilter.includes(p.created_by)) return false;
+    }
+
+    // 🗾 都道府県指定
+    if (st.prefectureFilter) {
+      const pp = (p.prefecture ?? '').trim();
+      if (pp !== st.prefectureFilter) return false;
+    }
+
+    // 🔤 キーワード指定
+    if (kw) {
+      const hay = [p.name ?? '', p.comment ?? '', p.prefecture ?? '', ...(p.tags ?? [])]
+        .join('\n')
+        .toLowerCase();
+      if (!hay.includes(kw)) return false;
+    }
+
+    // ⭐評価指定
+    if (st.ratingFilter) {
+      const r = Number(st.ratingFilter);
+      if (Number(p.rating) !== r) return false;
+    }
+
+    return true;
+  })
+  .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
 
                         // 都道府県指定
                         if (st.prefectureFilter) {
@@ -1365,25 +1393,29 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         // User select menu (search filter user)
-        if (interaction.isUserSelectMenu()) {
-            const id = interaction.customId;
-            if (!id.startsWith('search:userPick:')) return;
+        // User select menu (search filter user)
+if (interaction.isUserSelectMenu()) {
+  const id = interaction.customId;
+  if (!id.startsWith('search:userPick:')) return;
 
-            const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+  const [, , gid, ownerId] = id.split(':');
+  if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+  if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-            const picked = interaction.values?.[0] ?? null;
-            const st = searchState.get(k) ?? { userIdFilter: null, keyword: '' };
-            st.userIdFilter = picked || null;
-            searchState.set(k, st);
+  // 複数取得（0件なら解除）
+  const pickedIds = (interaction.values ?? []).filter(Boolean);
+  const st = searchState.get(k) ?? { userIdFilter: null, prefectureFilter: null, keyword: '', ratingFilter: null, results: [], idx: 0 };
 
-            return interaction.reply({
-                ephemeral: true,
-                embeds: [searchPanelEmbed(st)],
-                components: searchPanelComponents(guildId, userId),
-            });
-        }
+  st.userIdFilter = pickedIds.length ? pickedIds : null;
+  searchState.set(k, st);
+
+  // 余計な「〜にしました」メッセージは出さず、パネルへ戻す（この update が正解）
+  return interaction.update({
+    content: '',
+    embeds: [searchPanelEmbed(st)],
+    components: searchPanelComponents(guildId, userId),
+  });
+}
 
         // String select menu (mine list pick)
         if (interaction.isStringSelectMenu()) {
