@@ -137,6 +137,17 @@ async function blankPromptRef(ref) {
     }
 }
 
+async function editPromptRef(ref, payload) {
+    try {
+        if (!ref?.webhook || !ref?.messageId) return false;
+        await ref.webhook.editMessage(ref.messageId, payload);
+        return true;
+    } catch (e) {
+        console.error('editPromptRef failed:', e);
+        return false;
+    }
+}
+
 async function clearEphemeralMessage(interaction) {
     try {
         if (interaction?.message?.id) {
@@ -571,6 +582,28 @@ function prefSlice(page = 0) {
 }
 
 // ====== UI builders ======
+function photoWaitingEmbed(name) {
+    return new EmbedBuilder()
+        .setTitle('📷 写真追加')
+        .setDescription(
+            `**${name}** を登録しました。\n` +
+            'このチャンネルに写真を送信してください（5分以内）。\n' +
+            '送信した画像をすべて追加します。投稿後、Botが元メッセージを消します。'
+        );
+}
+
+function photoWaitingComponents() {
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('photo:waiting')
+                .setLabel('写真を送信待ち')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(true)
+        ),
+    ];
+}
+
 function buildVisitedDateModal(gid, ownerId, mode, postId = '', currentValue = '') {
     const modal = new ModalBuilder()
         .setCustomId(`modalVisitedDate:${gid}:${ownerId}:${mode}:${postId || ''}`)
@@ -2109,16 +2142,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
-                // 先にACKしてモーダルを安全に閉じる
-                await interaction.deferReply({ ephemeral: true });
-
                 d.visitedDate = normalized || '';
                 draftRating.set(k, d);
 
-                await blankPromptRef(visitedDatePromptRef.get(k));
-                visitedDatePromptRef.delete(k);
-
-                await interaction.editReply({
+                // modalの返答をまず作る
+                await interaction.reply({
+                    ephemeral: true,
                     content: '都道府県を選んでください（任意）',
                     embeds: [],
                     components: prefPickComponents(mode, gid, ownerId),
@@ -2137,6 +2166,10 @@ client.on(Events.InteractionCreate, async interaction => {
                     draftRating.set(k, d);
                 }
 
+                // 最後に、直前の「訪問日を入力しますか？」を空にする
+                await blankPromptRef(visitedDatePromptRef.get(k));
+                visitedDatePromptRef.delete(k);
+
                 return;
             }
 
@@ -2151,8 +2184,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '評価が未選択です。もう一度やり直してください。' });
                 }
 
-                await blankPromptRef(prefPromptRef.get(k));
-                prefPromptRef.delete(k);
+                // 先に都道府県メッセージ参照を退避
+                const prefRef = prefPromptRef.get(k);
 
                 const name = interaction.fields.getTextInputValue('name')?.trim();
                 const comment = interaction.fields.getTextInputValue('comment')?.trim();
@@ -2194,6 +2227,24 @@ client.on(Events.InteractionCreate, async interaction => {
                 await sent.edit({ embeds: [buildPostEmbedForDb(post)] });
                 cache.set(post.id, post);
 
+                const photoPayload = {
+                    content: '',
+                    embeds: [photoWaitingEmbed(post.name)],
+                    components: photoWaitingComponents(),
+                };
+
+                const updated = await editPromptRef(prefRef, photoPayload);
+
+                if (updated) {
+                    if (prefRef?.messageId) addUiMessageId(guildId, userId, prefRef.messageId);
+                } else {
+                    await interaction.reply({
+                        ephemeral: true,
+                        ...photoPayload,
+                    });
+                    await rememberUiReply(interaction, guildId, userId);
+                }
+
                 // 写真追加待ち
                 awaitingPhoto.set(k, {
                     postId: post.id,
@@ -2201,15 +2252,10 @@ client.on(Events.InteractionCreate, async interaction => {
                     guildId,
                     expiresAt: Date.now() + 300_000,
                     interaction,
+                    uiMessageRef: updated ? prefRef : null,
                 });
 
-                await interaction.reply({
-                    ephemeral: true,
-                    content:
-                        `登録しました：${post.name}\n` +
-                        '写真を送信してください（5分以内）。送信した画像をすべて追加します。（投稿後、Botが消します）',
-                });
-                await rememberUiReply(interaction, guildId, userId);
+                prefPromptRef.delete(k);
                 return;
             }
 
@@ -2377,7 +2423,24 @@ client.on(Events.MessageCreate, async msg => {
         cache.set(post.id, post);
 
         // ephemeral消す
-        if (wait.interaction) {
+        if (wait.uiMessageRef) {
+
+            await editPromptRef(wait.uiMessageRef, {
+                content: '',
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('✅ 写真追加完了')
+                        .setDescription(`**${post.name}** に写真を追加しました。`)
+                ],
+                components: [],
+            });
+
+            setTimeout(async () => {
+                try {
+                    await wait.uiMessageRef.webhook.deleteMessage(wait.uiMessageRef.messageId);
+                } catch { }
+            }, 5000);
+        } else if (wait.interaction) {
             try { await wait.interaction.deleteReply(); } catch { }
         }
 
