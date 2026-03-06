@@ -85,7 +85,7 @@ const searchState = new Map();
 const mineState = new Map();
 
 // 写真追加待ち key: guildId:userId
-// { postId, channelId, guildId, expiresAt, uiMessageId?:string }
+// { postId, channelId, guildId, expiresAt, uiMessageRef?, backTo?: 'home'|'detail' }
 const awaitingPhoto = new Map();
 
 // ephemeralプロンプトを消すための参照
@@ -602,7 +602,7 @@ function photoAddWaitingEmbed(name) {
         );
 }
 
-function photoWaitingComponents() {
+function photoWaitingComponents(guildId, userId) {
     return [
         new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -611,6 +611,7 @@ function photoWaitingComponents() {
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(true)
         ),
+        ...cancelRow(guildId, userId),
     ];
 }
 
@@ -733,6 +734,21 @@ function homeComponents() {
             new ButtonBuilder().setCustomId('home:mine').setLabel('📚 自分の記録').setStyle(ButtonStyle.Secondary)
         ),
     ];
+}
+
+function cancelRow(guildId, userId) {
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`cancel:flow:${guildId}:${userId}`)
+                .setLabel('✖ 中断')
+                .setStyle(ButtonStyle.Danger)
+        ),
+    ];
+}
+
+function withCancelRows(rows, guildId, userId) {
+    return [...rows, ...cancelRow(guildId, userId)];
 }
 
 function visitRow(prefix, guildId, userId, postId = '') {
@@ -973,6 +989,13 @@ function homeEmbed() {
         .setDescription('操作を選択してください');
 }
 
+async function updateLike(interaction, payload) {
+    if (interaction.deferred || interaction.replied) {
+        return interaction.editReply(payload);
+    }
+    return interaction.update(payload);
+}
+
 async function renderMineList(interaction, guildId, userId, { update = false } = {}) {
     await ensureCacheLoadedForGuild(interaction.guild);
     const cache = getGuildCache(guildId);
@@ -986,10 +1009,17 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
             .setDescription('(まだありません)');
 
         if (update) {
-            return interaction.update({ embeds: [e], components: homeComponents() });
+            return updateLike(interaction, {
+                embeds: [e],
+                components: homeComponents(),
+            });
         }
 
-        await interaction.reply({ ephemeral: true, embeds: [e], components: homeComponents() });
+        await interaction.reply({
+            ephemeral: true,
+            embeds: [e],
+            components: homeComponents(),
+        });
         await rememberUiReply(interaction, guildId, userId);
         return;
     }
@@ -1008,7 +1038,10 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     mineState.set(k, st);
 
     const start = page * pageSize;
-    const slice = filteredIds.slice(start, start + pageSize).map(pid => cache.get(pid)).filter(Boolean);
+    const slice = filteredIds
+        .slice(start, start + pageSize)
+        .map(pid => cache.get(pid))
+        .filter(Boolean);
 
     const listHeader = new EmbedBuilder()
         .setTitle('📚 自分の記録')
@@ -1027,10 +1060,17 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     const embeds = [listHeader, ...slice.map(buildCardEmbed)];
 
     if (update) {
-        return interaction.update({ embeds, components: comps });
+        return updateLike(interaction, {
+            embeds,
+            components: comps,
+        });
     }
 
-    await interaction.reply({ ephemeral: true, embeds, components: comps });
+    await interaction.reply({
+        ephemeral: true,
+        embeds,
+        components: comps,
+    });
     await rememberUiReply(interaction, guildId, userId);
 }
 
@@ -1116,7 +1156,7 @@ async function renderSearchResult(interaction, guildId, userId, { update = false
             embeds: [searchPanelEmbed(panel)],
             components: searchPanelComponents(guildId, userId, panel)
         };
-        if (update) return interaction.update(payload);
+        if (update) return updateLike(interaction, payload);
 
         await interaction.reply({ ephemeral: true, ...payload });
         await rememberUiReply(interaction, guildId, userId);
@@ -1152,7 +1192,7 @@ async function renderSearchResult(interaction, guildId, userId, { update = false
         }),
     };
 
-    if (update) return interaction.update(payload);
+    if (update) return updateLike(interaction, payload);
 
     await interaction.reply({ ephemeral: true, ...payload });
     await rememberUiReply(interaction, guildId, userId);
@@ -1189,6 +1229,58 @@ client.on(Events.InteractionCreate, async interaction => {
         // Buttons
         if (interaction.isButton()) {
             const id = interaction.customId;
+
+            // 記録フロー中断
+            if (id.startsWith('cancel:flow:')) {
+                const [, , gid, ownerId] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                draftRating.delete(k);
+                visitedDatePromptRef.delete(k);
+                prefPromptRef.delete(k);
+
+                const wait = awaitingPhoto.get(k);
+                awaitingPhoto.delete(k);
+
+                if (wait?.backTo === 'detail' && wait.postId) {
+                    await ensureCacheLoadedForGuild(interaction.guild);
+                    const cache = getGuildCache(guildId);
+                    const post = cache.get(wait.postId);
+
+                    if (post) {
+                        const fromMine = cameFromMine(k, wait.postId, mineState);
+
+                        const { detail, components } = renderDetail(interaction, {
+                            post,
+                            guildId,
+                            userId,
+                            fromMine,
+                            total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
+                        });
+
+                        return interaction.update({
+                            content: '',
+                            embeds: [detail],
+                            components,
+                        });
+                    }
+                }
+
+                await interaction.update({
+                    content: '',
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
+                });
+
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                return;
+            }
 
             if (id.startsWith('confirm:')) {
                 const [, answer, kind, gid, ownerId, postId, extra] = id.split(':');
@@ -1432,7 +1524,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.update({
                     content: '都道府県を選択してください（任意）',
                     embeds: [],
-                    components: prefPickComponents(mode, gid, ownerId),
+                    components: withCancelRows(
+                        prefPickComponents(mode, gid, ownerId),
+                        gid,
+                        ownerId
+                    ),
                 });
 
                 prefPromptRef.set(k, {
@@ -1533,7 +1629,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 // 同じephemeralメッセージを更新する（増やさない）
                 await interaction.update({
                     content: '都道府県を選択してください（任意）',
-                    components: prefPickComponents(mode, gid, ownerId, next),
+                    components: withCancelRows(
+                        prefPickComponents(mode, gid, ownerId, next),
+                        gid,
+                        ownerId
+                    ),
                 });
 
                 return;
@@ -1574,7 +1674,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.update({
                     content: '訪問状態を選択してください',
                     embeds: [],
-                    components: visitRow('visitCreate', guildId, userId),
+                    components: withCancelRows(visitRow('visitCreate', guildId, userId), guildId, userId),
                 });
                 await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
                 return;
@@ -1602,6 +1702,8 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (id === 'home:mine') {
+                await interaction.deferUpdate();
+
                 await ensureCacheLoadedForGuild(interaction.guild);
                 const cache = getGuildCache(guildId);
 
@@ -1664,7 +1766,11 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.update({
                         content: '都道府県を選択してください（任意）',
                         embeds: [],
-                        components: prefPickComponents(mode, gid, ownerId),
+                        components: withCancelRows(
+                            prefPickComponents(mode, gid, ownerId),
+                            gid,
+                            ownerId
+                        ),
                     });
 
                     prefPromptRef.set(k, {
@@ -1677,7 +1783,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.update({
                     content: '評価を選択してください',
                     embeds: [],
-                    components: ratingRow(mode === 'create' ? 'rateCreate' : 'rateEdit', guildId, ownerId, postId || ''),
+                    components: withCancelRows(
+                        ratingRow(mode === 'create' ? 'rateCreate' : 'rateEdit', guildId, ownerId, postId || ''),
+                        guildId,
+                        ownerId
+                    ),
                 });
                 return;
             }
@@ -1713,7 +1823,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.update({
                     content: '訪問日を入力してください（任意）',
                     embeds: [],
-                    components: visitedDateAskComponents(guildId, ownerId, mode, postId || ''),
+                    components: withCancelRows(
+                        visitedDateAskComponents(guildId, ownerId, mode, postId || ''),
+                        guildId,
+                        ownerId
+                    ),
                 });
 
                 visitedDatePromptRef.set(k, {
@@ -1926,7 +2040,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
-                return renderSearchResult(interaction, guildId, userId, { update: false });
+                return renderSearchResult(interaction, guildId, userId, { update: true });
             }
 
             // ⭐評価フィルター
@@ -2040,7 +2154,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.update({
                     content: `訪問状態を選択してください（現在: ${visitLabel(post)}）`,
                     embeds: [],
-                    components: visitRow('visitEdit', guildId, ownerId, postId),
+                    components: withCancelRows(
+                        visitRow('visitEdit', guildId, ownerId, postId),
+                        guildId,
+                        ownerId
+                    ),
                 });
                 await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
                 return;
@@ -2148,7 +2266,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     const waitPayload = {
                         content: '',
                         embeds: [photoAddWaitingEmbed(post.name)],
-                        components: photoWaitingComponents(),
+                        components: photoWaitingComponents(guildId, userId),
                     };
 
                     await interaction.update(waitPayload);
@@ -2158,6 +2276,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         channelId: interaction.channelId,
                         guildId,
                         expiresAt: Date.now() + 300_000,
+                        backTo: 'detail',
                         uiMessageRef: {
                             webhook: interaction.webhook,
                             messageId: interaction.message?.id,
@@ -2428,15 +2547,23 @@ client.on(Events.InteractionCreate, async interaction => {
             const postId = interaction.values?.[0];
             if (!postId || postId === 'none') return interaction.reply({ ephemeral: true, content: '選択が不正です' });
 
+            await interaction.deferUpdate();
+
             await ensureCacheLoadedForGuild(interaction.guild);
             const cache = getGuildCache(guildId);
             const post = cache.get(postId);
-            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+            if (!post) {
+                return interaction.editReply({
+                    content: 'データが見つかりません',
+                    embeds: [],
+                    components: homeComponents(),
+                });
+            }
 
             const embed = buildPostEmbedForView(post);
             embed.setTitle(`📄 詳細  ${post.name}`.trim());
 
-            await interaction.update({
+            await interaction.editReply({
                 content: '',
                 embeds: [embed],
                 components: detailActionComponents(guildId, userId, postId, {
@@ -2486,7 +2613,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 const updated = await editPromptRef(visitedRef, {
                     content: '都道府県を選択してください（任意）',
                     embeds: [],
-                    components: prefPickComponents(mode, gid, ownerId),
+                    components: withCancelRows(
+                        prefPickComponents(mode, gid, ownerId),
+                        gid,
+                        ownerId
+                    ),
                 });
 
                 if (updated) {
@@ -2506,7 +2637,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply({
                     content: '都道府県を選択してください（任意）',
                     embeds: [],
-                    components: prefPickComponents(mode, gid, ownerId),
+                    components: withCancelRows(
+                        prefPickComponents(mode, gid, ownerId),
+                        gid,
+                        ownerId
+                    ),
                 });
 
                 const sent = await interaction.fetchReply().catch(() => null);
@@ -2580,38 +2715,37 @@ client.on(Events.InteractionCreate, async interaction => {
                 await sent.edit({ embeds: [buildPostEmbedForDb(post)] });
                 cache.set(post.id, post);
 
-                await interaction.deferReply({ ephemeral: true });
-
-                const photoPayload = {
-                    content: '',
-                    embeds: [photoWaitingEmbed(post.name)],
-                    components: photoWaitingComponents(),
-                };
-
-                const updated = await editPromptRef(prefRef, photoPayload);
-
-                if (updated) {
-                    if (prefRef?.messageId) addUiMessageId(guildId, userId, prefRef.messageId);
-
-                    try {
-                        await interaction.deleteReply();
-                    } catch { }
-                } else {
-                    await interaction.editReply(photoPayload);
-                    const sent = await interaction.fetchReply().catch(() => null);
-                    if (sent?.id) addUiMessageId(guildId, userId, sent.id);
-                }
-                // 写真追加待ち
                 awaitingPhoto.set(k, {
                     postId: post.id,
                     channelId: interaction.channelId,
                     guildId,
                     expiresAt: Date.now() + 300_000,
-                    interaction,
-                    uiMessageRef: updated ? prefRef : null,
+                    backTo: 'home',
+                    uiMessageRef: prefRef ?? null,
                 });
 
+                draftRating.delete(k);
+                visitedDatePromptRef.delete(k);
                 prefPromptRef.delete(k);
+
+                const homePayload = {
+                    content: `✅ **${post.name}** を登録しました\nこのチャンネルに写真を送ると5分以内なら自動で追加されます`,
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
+                };
+
+                const updated = await editPromptRef(prefRef, homePayload);
+
+                if (updated) {
+                    await clearOtherUiMessages(interaction, guildId, userId, prefRef?.messageId ?? null);
+                    return;
+                }
+
+                await interaction.reply({
+                    ephemeral: true,
+                    ...homePayload,
+                });
+                await rememberUiReply(interaction, guildId, userId);
                 return;
             }
 
@@ -2798,20 +2932,28 @@ client.on(Events.MessageCreate, async msg => {
 
         // 写真追加後は詳細画面に戻す
         if (wait.uiMessageRef) {
-            const detail = buildPostEmbedForView(post);
-            detail.setTitle(`📄 詳細  ${post.name}`.trim());
+            if (wait.backTo === 'home') {
+                await editPromptRef(wait.uiMessageRef, {
+                    content: `✅ 写真を追加しました: ${post.name}`,
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
+                });
+            } else {
+                const detail = buildPostEmbedForView(post);
+                detail.setTitle(`📄 詳細  ${post.name}`.trim());
 
-            const fromMine = cameFromMine(k, post.id, mineState);
+                const fromMine = cameFromMine(k, post.id, mineState);
 
-            await editPromptRef(wait.uiMessageRef, {
-                content: '',
-                embeds: [detail],
-                components: detailActionComponents(msg.guildId, msg.author.id, post.id, {
-                    fromMine,
-                    canEditThis: true,
-                    total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
-                }),
-            });
+                await editPromptRef(wait.uiMessageRef, {
+                    content: '',
+                    embeds: [detail],
+                    components: detailActionComponents(msg.guildId, msg.author.id, post.id, {
+                        fromMine,
+                        canEditThis: true,
+                        total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
+                    }),
+                });
+            }
         } else if (wait.interaction) {
             try { await wait.interaction.deleteReply(); } catch { }
         }
