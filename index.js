@@ -588,7 +588,7 @@ function photoWaitingEmbed(name) {
         .setDescription(
             `**${name}** を登録しました\n` +
             'このチャンネルに写真を送信してください（5分以内）\n' +
-            '送信した画像をすべて追加します投稿後、Botが元メッセージを消します'
+            '送信した画像をすべて追加します。投稿後、Botが元メッセージを削除します'
         );
 }
 
@@ -598,7 +598,7 @@ function photoAddWaitingEmbed(name) {
         .setDescription(
             `**${name}** に写真を追加します\n` +
             'このチャンネルに写真を送信してください（5分以内）\n' +
-            '送信した画像をすべて追加します投稿後、Botが元メッセージを消します'
+            '送信した画像をすべて追加します。投稿後、Botが元メッセージを削除します'
         );
 }
 
@@ -1342,43 +1342,18 @@ client.on(Events.InteractionCreate, async interaction => {
                 const post = cache.get(postId);
 
                 if (answer === 'no') {
-                    if (!post) {
-                        return interaction.update({
-                            embeds: [homeEmbed()],
-                            components: homeComponents(),
-                        });
+                    try {
+                        await interaction.webhook.deleteMessage(interaction.message.id);
+                    } catch {
+                        try {
+                            await interaction.update({
+                                content: ' ',
+                                embeds: [],
+                                components: [],
+                            });
+                        } catch { }
                     }
-
-                    if (kind === 'deletePhoto' || kind === 'deleteAllPhotos') {
-                        const urls = imageUrls(post);
-                        const idx = Math.max(0, Math.min(urls.length - 1, Number(extra) || 0));
-                        photoView.set(k, { postId, idx });
-
-                        const embed = new EmbedBuilder()
-                            .setTitle(`🖼 写真管理: ${post.name}`)
-                            .setDescription(urls.length ? `写真 ${idx + 1}/${urls.length}` : '写真はありません')
-                            .setImage(urls.length ? urls[idx] : null);
-
-                        return interaction.update({
-                            embeds: [embed],
-                            components: photoManagerComponents(guildId, ownerId, postId, urls.length > 0),
-                        });
-                    }
-
-                    const fromMine = cameFromMine(k, postId, mineState);
-                    const { detail, components } = renderDetail(interaction, {
-                        post,
-                        guildId,
-                        userId,
-                        fromMine,
-                        total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
-                    });
-
-                    return interaction.update({
-                        content: '',
-                        embeds: [detail],
-                        components,
-                    });
+                    return;
                 }
 
                 // ===== YES =====
@@ -2251,7 +2226,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '削除できるのは登録者のみです' });
                 }
 
-                return interaction.update({
+                return interaction.reply({
+                    ephemeral: true,
                     embeds: [
                         confirmEmbed(
                             '⚠ 店情報を削除',
@@ -2335,7 +2311,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     const urls = imageUrls(post);
                     if (!urls.length) return interaction.reply({ ephemeral: true, content: '写真がありません' });
 
-                    return interaction.update({
+                    return interaction.reply({
+                        ephemeral: true,
                         embeds: [
                             confirmEmbed(
                                 '⚠ 写真を削除',
@@ -2352,7 +2329,8 @@ client.on(Events.InteractionCreate, async interaction => {
                         return interaction.reply({ ephemeral: true, content: '写真がありません' });
                     }
 
-                    return interaction.update({
+                    return interaction.reply({
+                        ephemeral: true,
                         embeds: [
                             confirmEmbed(
                                 '⚠ 写真をすべて削除',
