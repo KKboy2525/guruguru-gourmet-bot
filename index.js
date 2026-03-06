@@ -88,8 +88,10 @@ const mineState = new Map();
 // { postId, channelId, guildId, expiresAt, uiMessageId?:string }
 const awaitingPhoto = new Map();
 
-// 都道府県ピッカーのメッセージを消す用
-const prefPromptInteraction = new Map();
+// ephemeralプロンプトを消すための参照
+// key: guildId:userId -> { webhook, messageId }
+const visitedDatePromptRef = new Map();
+const prefPromptRef = new Map();
 
 // 写真ビュー状態 key: guildId:userId
 // { postId, idx }
@@ -119,6 +121,19 @@ async function blankMessageById(interaction, messageId) {
         });
     } catch (e) {
         console.error('blankMessageById failed:', e);
+    }
+}
+
+async function blankPromptRef(ref) {
+    try {
+        if (!ref?.webhook || !ref?.messageId) return;
+        await ref.webhook.editMessage(ref.messageId, {
+            content: ' ',
+            embeds: [],
+            components: [],
+        });
+    } catch (e) {
+        console.error('blankPromptRef failed:', e);
     }
 }
 
@@ -1095,6 +1110,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     embeds: [],
                     components: prefPickComponents(mode, gid, ownerId),
                 });
+
+                prefPromptRef.set(k, {
+                    webhook: interaction.webhook,
+                    messageId: interaction.message?.id,
+                });
+
                 return;
             }
 
@@ -1288,6 +1309,12 @@ client.on(Events.InteractionCreate, async interaction => {
                         embeds: [],
                         components: prefPickComponents(mode, gid, ownerId),
                     });
+
+                    prefPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: interaction.message?.id,
+                    });
+
                     return;
                 }
                 await interaction.update({
@@ -1331,6 +1358,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     embeds: [],
                     components: visitedDateAskComponents(guildId, ownerId, mode, postId || ''),
                 });
+
+                visitedDatePromptRef.set(k, {
+                    webhook: interaction.webhook,
+                    messageId: interaction.message?.id,
+                });
+
                 return;
             }
 
@@ -2072,8 +2105,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.visitedDate = normalized || '';
                 draftRating.set(k, d);
 
-                // 「訪問日を入力しますか？」メッセージを消す
-                await blankMessageById(interaction, d.visitedDatePromptMessageId);
+                await blankPromptRef(visitedDatePromptRef.get(k));
+                visitedDatePromptRef.delete(k);
 
                 await interaction.editReply({
                     content: '都道府県を選んでください（任意）',
@@ -2084,6 +2117,12 @@ client.on(Events.InteractionCreate, async interaction => {
                 const sent = await interaction.fetchReply();
                 if (sent?.id) {
                     addUiMessageId(guildId, userId, sent.id);
+
+                    prefPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: sent.id,
+                    });
+
                     d.prefPromptMessageId = sent.id;
                     draftRating.set(k, d);
                 }
@@ -2102,7 +2141,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '評価が未選択です。もう一度やり直してください。' });
                 }
 
-                await blankMessageById(interaction, d.prefPromptMessageId);
+                await blankPromptRef(prefPromptRef.get(k));
+                prefPromptRef.delete(k);
 
                 const name = interaction.fields.getTextInputValue('name')?.trim();
                 const comment = interaction.fields.getTextInputValue('comment')?.trim();
@@ -2180,7 +2220,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '評価選択が未完了です。もう一度やり直してください。' });
                 }
 
-                await blankMessageById(interaction, d.prefPromptMessageId);
+                await blankPromptRef(prefPromptRef.get(k));
+                prefPromptRef.delete(k);
 
                 const name = interaction.fields.getTextInputValue('name')?.trim();
                 const comment = interaction.fields.getTextInputValue('comment')?.trim();
@@ -2250,7 +2291,11 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.isRepliable()) {
             try {
                 await interaction.reply({ ephemeral: true, content: `エラー: ${e.message}` });
-                await rememberUiReply(interaction, guildId, userId);
+                const gid = interaction.guildId;
+                const uid = interaction.user?.id;
+                if (gid && uid) {
+                    await rememberUiReply(interaction, gid, uid);
+                }
             } catch { }
         }
     }
