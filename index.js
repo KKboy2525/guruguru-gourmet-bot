@@ -72,6 +72,10 @@ const cacheReadyByGuild = new Map();
 // }
 const draftRating = new Map();
 
+// ユーザーごとのephemeral UIメッセージ管理
+// key: guildId:userId -> Set(messageId)
+const uiMessages = new Map();
+
 // 検索状態 key: guildId:userId
 // { userIdFilter?:string[]|null, prefectureFilter?:string|null, keyword?:string, results?:string[], idx?:number }
 const searchState = new Map();
@@ -92,6 +96,40 @@ const prefPromptInteraction = new Map();
 const photoView = new Map();
 
 // ====== util ======
+function addUiMessageId(guildId, userId, messageId) {
+    const k = keyOf(guildId, userId);
+    if (!uiMessages.has(k)) uiMessages.set(k, new Set());
+    uiMessages.get(k).add(messageId);
+}
+
+async function rememberUiReply(interaction, guildId, userId) {
+    try {
+        const msg = await interaction.fetchReply();
+        if (msg?.id) addUiMessageId(guildId, userId, msg.id);
+        return msg;
+    } catch {
+        return null;
+    }
+}
+
+async function clearOtherUiMessages(interaction, guildId, userId, keepMessageId = null) {
+    const k = keyOf(guildId, userId);
+    const ids = [...(uiMessages.get(k) ?? new Set())];
+
+    for (const mid of ids) {
+        if (keepMessageId && mid === keepMessageId) continue;
+        try {
+            await interaction.webhook.deleteMessage(mid);
+        } catch { }
+    }
+
+    if (keepMessageId) {
+        uiMessages.set(k, new Set([keepMessageId]));
+    } else {
+        uiMessages.delete(k);
+    }
+}
+
 function imageUrls(post) {
     const imgs = post.images ?? [];
     return imgs.map(x => (typeof x === 'string' ? x : x?.url)).filter(Boolean);
@@ -586,7 +624,7 @@ function visitRow(prefix, guildId, userId, postId = '') {
             new ButtonBuilder()
                 .setCustomId(`${prefix}:visited:${guildId}:${userId}:${postId}`)
                 .setLabel('✅ 行った')
-                .setStyle(ButtonStyle.Primary),
+                .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId(`${prefix}:planned:${guildId}:${userId}:${postId}`)
                 .setLabel('📝 行きたい')
@@ -645,11 +683,13 @@ function prefPickComponents(mode, guildId, userId, page = 0) {
 
 function searchPanelEmbed(state) {
     const userLabel = state.userIdFilter?.length
-  ? state.userIdFilter.map(id => `<@${id}>`).join(' ')
-  : '(指定なし)';
+        ? state.userIdFilter.map(id => `<@${id}>`).join(' ')
+        : '(指定なし)';
     const prefLabel = state.prefectureFilter ? state.prefectureFilter : '(指定なし)';
     const keyword = state.keyword ? `"${state.keyword}"` : '(指定なし)';
-    const ratingLabel = state.ratingFilter ? '⭐'.repeat(state.ratingFilter) : '(指定なし)';
+    const ratingLabel = state.ratingFilters?.length
+        ? state.ratingFilters.map(r => `⭐${r}`).join(' ')
+        : '(指定なし)';
 
     return new EmbedBuilder().setTitle('🔎 検索').setDescription(
         `👤 人フィルター: ${userLabel}\n` +
@@ -659,7 +699,7 @@ function searchPanelEmbed(state) {
     );
 }
 
-function searchPanelComponents(guildId, userId) {
+function searchPanelComponents(guildId, userId, st = {}) {
     return [
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`search:setUser:${guildId}:${userId}`).setLabel('👤 人を選ぶ').setStyle(ButtonStyle.Secondary),
@@ -667,11 +707,30 @@ function searchPanelComponents(guildId, userId) {
             new ButtonBuilder().setCustomId(`search:setText:${guildId}:${userId}`).setLabel('🔤 キーワード入力').setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:1`).setLabel('⭐1').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:2`).setLabel('⭐2').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:3`).setLabel('⭐3').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:4`).setLabel('⭐4').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`search:setRating:${guildId}:${userId}:5`).setLabel('⭐5').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder()
+                .setCustomId(`search:setRating:${guildId}:${userId}:1`)
+                .setLabel(`${st?.ratingFilters?.includes(1) ? '☑' : '☐'} ⭐1`)
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:setRating:${guildId}:${userId}:2`)
+                .setLabel(`${st?.ratingFilters?.includes(2) ? '☑' : '☐'} ⭐2`)
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:setRating:${guildId}:${userId}:3`)
+                .setLabel(`${st?.ratingFilters?.includes(3) ? '☑' : '☐'} ⭐3`)
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:setRating:${guildId}:${userId}:4`)
+                .setLabel(`${st?.ratingFilters?.includes(4) ? '☑' : '☐'} ⭐4`)
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:setRating:${guildId}:${userId}:5`)
+                .setLabel(`${st?.ratingFilters?.includes(5) ? '☑' : '☐'} ⭐5`)
+                .setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`search:run:${guildId}:${userId}`).setLabel('✅ 検索実行').setStyle(ButtonStyle.Primary),
@@ -790,7 +849,9 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
             }
             return interaction.editReply({ embeds: [e], components: homeComponents() });
         }
-        return interaction.reply({ ephemeral: true, embeds: [e], components: homeComponents() });
+        await interaction.reply({ ephemeral: true, embeds: [e], components: homeComponents() });
+        await rememberUiReply(interaction, guildId, userId);
+        return;
     }
 
     const filteredIds = st.results.filter(pid => {
@@ -832,7 +893,9 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         return interaction.editReply({ embeds, components: comps });
     }
 
-    return interaction.reply({ ephemeral: true, embeds, components: comps });
+    await interaction.reply({ ephemeral: true, embeds, components: comps });
+    await rememberUiReply(interaction, guildId, userId);
+    return;
 }
 
 function detailComponentsFromMine(guildId, userId, postId) {
@@ -857,7 +920,7 @@ function detailComponentsFromMine(guildId, userId, postId) {
                 .setCustomId(`res:delete:${guildId}:${userId}:${postId}`)
                 .setLabel('🗑 削除')
                 .setStyle(ButtonStyle.Danger),
-    
+
             new ButtonBuilder()
                 .setCustomId(`mine:back:${guildId}:${userId}`)
                 .setLabel('🔙 戻る')
@@ -887,9 +950,12 @@ async function renderSearchResult(interaction, guildId, userId, { update = false
     const st = searchState.get(k);
     if (!st?.results?.length) {
         const panel = searchState.get(k) ?? { userIdFilter: null, keyword: '' };
-        const payload = { embeds: [searchPanelEmbed(panel)], components: searchPanelComponents(guildId, userId) };
+        const payload = { embeds: [searchPanelEmbed(panel)], components: searchPanelComponents(guildId, userId, st) };
         if (update) return interaction.update(payload);
-        return interaction.reply({ ephemeral: true, ...payload });
+
+        await interaction.reply({ ephemeral: true, ...payload });
+        await rememberUiReply(interaction, guildId, userId);
+        return;
     }
 
     await ensureCacheLoadedForGuild(interaction.guild);
@@ -918,7 +984,10 @@ async function renderSearchResult(interaction, guildId, userId, { update = false
     };
 
     if (update) return interaction.update(payload);
-    return interaction.reply({ ephemeral: true, ...payload });
+
+    await interaction.reply({ ephemeral: true, ...payload });
+    await rememberUiReply(interaction, guildId, userId);
+    return;
 }
 
 // ====== interactions ======
@@ -943,13 +1012,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            return interaction.reply({ ephemeral: true, embeds: [homeEmbed()], components: homeComponents() });
+            await interaction.reply({ ephemeral: true, embeds: [homeEmbed()], components: homeComponents() });
+            await rememberUiReply(interaction, guildId, userId);
+            return;
         }
 
         // Buttons
         if (interaction.isButton()) {
             const id = interaction.customId;
-            
+
             if (id.startsWith('date:input:')) {
                 const [, action, gid, ownerId, mode, postId] = id.split(':');
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
@@ -961,7 +1032,18 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 const currentValue = d.visitedDate ?? '';
-                return interaction.showModal(buildVisitedDateModal(gid, ownerId, mode, postId || '', currentValue));
+
+                try {
+                    await interaction.message.edit({
+                        content: '訪問日入力を開いています...',
+                        embeds: [],
+                        components: [],
+                    });
+                } catch { }
+
+                return interaction.showModal(
+                    buildVisitedDateModal(gid, ownerId, mode, postId || '', currentValue)
+                );
             }
 
             if (id.startsWith('date:skip:')) {
@@ -978,18 +1060,22 @@ client.on(Events.InteractionCreate, async interaction => {
                 draftRating.set(k, d);
 
                 try {
-                    await interaction.deferUpdate();
-                    await interaction.deleteReply();
-                } catch {}
+                    await interaction.message.edit({
+                        content: '訪問日：未設定',
+                        embeds: [],
+                        components: [],
+                    });
+                } catch { }
 
-                await interaction.followUp({
+                const sent = await interaction.reply({
                     ephemeral: true,
                     content: '都道府県を選んでください（任意）',
                     components: prefPickComponents(mode, gid, ownerId),
                 });
+                await rememberUiReply(interaction, guildId, userId);
                 return;
             }
-            
+
             if (id.startsWith('search:prefPagePrev:') || id.startsWith('search:prefPageNext:')) {
                 const parts = id.split(':');
                 const gid = parts[2];
@@ -1036,7 +1122,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.update({
                     content: '都道府県フィルタを解除しました。',
                     embeds: [searchPanelEmbed(st)],
-                    components: searchPanelComponents(guildId, userId),
+                    components: searchPanelComponents(guildId, userId, st),
                 });
             }
 
@@ -1077,6 +1163,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.prefecture = '';
                 draftRating.set(k, d);
 
+                try {
+                    await interaction.message.edit({
+                        content: '都道府県：未設定\n入力フォームを開くよ',
+                        embeds: [],
+                        components: [],
+                    });
+                } catch { }
+
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
                 } else {
@@ -1100,18 +1194,20 @@ client.on(Events.InteractionCreate, async interaction => {
                     content: 'まず「行った / 行きたい」を選んでね',
                     components: visitRow('visitCreate', guildId, userId),
                 });
-
+                await rememberUiReply(interaction, guildId, userId);
                 return;
             }
 
             if (id === 'home:search') {
                 const st = searchState.get(k) ?? { userIdFilter: null, prefectureFilter: null, keyword: '', results: [], idx: 0 };
                 searchState.set(k, st);
-                return interaction.reply({
+                await interaction.reply({
                     ephemeral: true,
                     embeds: [searchPanelEmbed(st)],
-                    components: searchPanelComponents(guildId, userId),
+                    components: searchPanelComponents(guildId, userId, st),
                 });
+                await rememberUiReply(interaction, guildId, userId);
+                return;
             }
 
             if (id === 'home:mine') {
@@ -1166,26 +1262,31 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
 
                 try {
-                    await interaction.deferUpdate();
-                    await interaction.deleteReply();
-                } catch {}
+                    await interaction.message.edit({
+                        content: '行った / 行きたい を選択済み',
+                        embeds: [],
+                        components: [],
+                    });
+                } catch { }
 
                 if (!visited) {
-                    const sent = await interaction.followUp({
+                    await interaction.reply({
                         ephemeral: true,
                         content: '都道府県を選んでください（任意）',
-                        components: prefPickComponents(mode, guildId, ownerId),
+                        components: prefPickComponents(mode, gid, ownerId),
                     });
-                    prefPromptInteraction.set(k, sent);
+                    await rememberUiReply(interaction, guildId, userId);
                     return;
                 }
 
-                await interaction.followUp({
+                await interaction.reply({
                     ephemeral: true,
                     content: '評価を選んでね',
                     components: ratingRow(mode === 'create' ? 'rateCreate' : 'rateEdit', guildId, ownerId, postId || ''),
                 });
-                return;            }
+                await rememberUiReply(interaction, guildId, userId);
+                return;
+            }
 
             // rating
             if (id.startsWith('rateCreate:') || id.startsWith('rateEdit:')) {
@@ -1214,17 +1315,20 @@ client.on(Events.InteractionCreate, async interaction => {
                     channelId: interaction.channelId,
                 });
 
-                // 押した評価メッセージを消す
                 try {
-                    await interaction.deferUpdate();
-                    await interaction.deleteReply();
-                } catch {}
+                    await interaction.message.edit({
+                        content: '評価を選択済み',
+                        embeds: [],
+                        components: [],
+                    });
+                } catch { }
 
-                await interaction.followUp({
+                await interaction.reply({
                     ephemeral: true,
                     content: '訪問日を入力しますか？（任意）',
                     components: visitedDateAskComponents(guildId, ownerId, mode, postId || ''),
                 });
+                await rememberUiReply(interaction, guildId, userId);
                 return;
             }
 
@@ -1242,11 +1346,13 @@ client.on(Events.InteractionCreate, async interaction => {
                         .setMaxValues(25)
                 );
 
-                return interaction.reply({
+                await interaction.reply({
                     ephemeral: true,
                     content: '人を選んでね',
                     components: [row],
                 });
+                await rememberUiReply(interaction, guildId, userId);
+                return;
             }
 
             if (id.startsWith('search:setPref:')) {
@@ -1282,11 +1388,13 @@ client.on(Events.InteractionCreate, async interaction => {
                         .setStyle(ButtonStyle.Secondary),
                 );
 
-                return interaction.reply({
+                await interaction.reply({
                     ephemeral: true,
                     content: '都道府県を選んでね',
                     components: [new ActionRowBuilder().addComponents(select), nav],
                 });
+                await rememberUiReply(interaction, guildId, userId);
+                return;
             }
 
             if (id.startsWith('search:setText:')) {
@@ -1301,7 +1409,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId('keyword')
-                            .setLabel('キーワード（部分一致：店名/コメント/タグ）')
+                            .setLabel('キーワード（スペース区切りで複数検索：店名/都道府県/コメント/タグ）')
+                            .setPlaceholder('例：ラーメン 東京 深夜')
                             .setStyle(TextInputStyle.Short)
                             .setRequired(false)
                             .setValue(st.keyword ?? '')
@@ -1315,9 +1424,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-                const st = { userIdFilter: null, prefectureFilter: null, keyword: '', results: [], idx: 0 };
+                const st = { userIdFilter: null, prefectureFilter: null, keyword: '', ratingFilters: [], results: [], idx: 0 };
                 searchState.set(k, st);
-                return interaction.update({ embeds: [searchPanelEmbed(st)], components: searchPanelComponents(guildId, userId) });
+                return interaction.update({ embeds: [searchPanelEmbed(st)], components: searchPanelComponents(guildId, userId, st) });
             }
 
             if (id.startsWith('search:back:')) {
@@ -1325,7 +1434,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-                return interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
+                await interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                return;
             }
 
             if (id.startsWith('search:run:')) {
@@ -1337,10 +1448,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 const cache = getGuildCache(guildId);
 
                 const st = searchState.get(k) ?? { userIdFilter: null, keyword: '' };
-                const kw = (st.keyword ?? '').trim().toLowerCase();
+                const keywords = (st.keyword ?? '')
+                    .toLowerCase()
+                    .trim()
+                    .split(/\s+/)   // 半角スペース区切り
+                    .filter(Boolean);
 
                 const results = [...cache.values()]
                     .filter(p => {
+
                         if (st.userIdFilter?.length) {
                             if (!st.userIdFilter.includes(p.created_by)) return false;
                         }
@@ -1350,33 +1466,44 @@ client.on(Events.InteractionCreate, async interaction => {
                             if (pp !== st.prefectureFilter) return false;
                         }
 
-                        if (kw) {
-                            const hay = [p.name ?? '', p.comment ?? '', p.prefecture ?? '', ...(p.tags ?? [])]
+                        if (keywords.length) {
+
+                            const hay = [
+                                p.name ?? '',
+                                p.comment ?? '',
+                                p.prefecture ?? '',
+                                ...(p.tags ?? [])
+                            ]
                                 .join('\n')
                                 .toLowerCase();
-                            if (!hay.includes(kw)) return false;
+
+                            // 全キーワード一致
+                            for (const kw of keywords) {
+                                if (!hay.includes(kw)) return false;
+                            }
                         }
 
-                        if (st.ratingFilter) {
-                            const r = Number(st.ratingFilter);
-                            if (Number(p.rating) !== r) return false;
+                        if (st.ratingFilters?.length) {
+                            if (!st.ratingFilters.includes(Number(p.rating))) return false;
                         }
 
                         return true;
                     })
                     .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-    
+
                 st.results = results.map(p => p.id);
                 st.idx = 0;
                 searchState.set(k, st);
 
                 if (!st.results.length) {
-                    return interaction.reply({
+                    await interaction.reply({
                         ephemeral: true,
                         content: '該当なしでした。',
                         embeds: [searchPanelEmbed(st)],
-                        components: searchPanelComponents(guildId, userId),
+                        components: searchPanelComponents(guildId, userId, st),
                     });
+                    await rememberUiReply(interaction, guildId, userId);
+                    return;
                 }
 
                 return renderSearchResult(interaction, guildId, userId, { update: false });
@@ -1389,13 +1516,29 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
                 const rating = Number(ratingStr);
-                const st = searchState.get(k) ?? { userIdFilter: null, prefectureFilter: null, keyword: '', ratingFilter: null, results: [], idx: 0 };
-                st.ratingFilter = rating;
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilter: null,
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    idx: 0
+                };
+
+                st.ratingFilters = Array.isArray(st.ratingFilters) ? st.ratingFilters : [];
+
+                if (st.ratingFilters.includes(rating)) {
+                    st.ratingFilters = st.ratingFilters.filter(x => x !== rating);
+                } else {
+                    st.ratingFilters.push(rating);
+                    st.ratingFilters.sort((a, b) => a - b);
+                }
+
                 searchState.set(k, st);
 
                 return interaction.update({
                     embeds: [searchPanelEmbed(st)],
-                    components: searchPanelComponents(guildId, userId),
+                    components: searchPanelComponents(guildId, userId, st),
                 });
             }
 
@@ -1444,7 +1587,9 @@ client.on(Events.InteractionCreate, async interaction => {
                     await interaction.channel.send({ embeds });
                 }
 
-                return interaction.reply({ ephemeral: true, content: 'このチャンネルに送信しました。' });
+                await interaction.reply({ ephemeral: true, content: 'このチャンネルに送信しました。' });
+                await rememberUiReply(interaction, guildId, userId);
+                return;
             }
 
             // Edit from result (only if canEdit)
@@ -1464,7 +1609,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     content: `まず「行った / 行きたい」を選んでね（現在: ${visitLabel(post)}）`,
                     components: visitRow('visitEdit', guildId, ownerId, postId),
                 });
-                
+                await rememberUiReply(interaction, guildId, userId);
                 return;
             }
 
@@ -1511,7 +1656,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 const fromMine = cameFromMine(k, postId, mineState);
-                
+
                 const dbCh = await getDbChannelForGuild(interaction.guild);
 
                 // 写真メッセージ削除
@@ -1521,14 +1666,14 @@ client.on(Events.InteractionCreate, async interaction => {
                     try {
                         const m = await dbCh.messages.fetch(msgId);
                         await m.delete();
-                    } catch {}
+                    } catch { }
                 }
 
                 // 本体削除
                 try {
                     const main = await dbCh.messages.fetch(postId);
                     await main.delete();
-                } catch {}
+                } catch { }
 
                 cache.delete(postId);
 
@@ -1554,7 +1699,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     if (!st.results.length) {
                         return interaction.update({
                             embeds: [searchPanelEmbed(st)],
-                            components: searchPanelComponents(guildId, userId),
+                            components: searchPanelComponents(guildId, userId, st),
                         });
                     }
                     return renderSearchResult(interaction, guildId, userId, { update: true });
@@ -1564,7 +1709,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     embeds: [homeEmbed()],
                     components: homeComponents(),
                 });
-      }
+            }
 
             // Back from result -> search panel
             if (id.startsWith('res:back:')) {
@@ -1576,11 +1721,17 @@ client.on(Events.InteractionCreate, async interaction => {
                     userIdFilter: null,
                     prefectureFilter: null,
                     keyword: '',
-                    ratingFilter: null,
+                    ratingFilters: [],
                     results: [],
                     idx: 0
                 };
-                return interaction.update({ embeds: [searchPanelEmbed(st)], components: searchPanelComponents(guildId, userId) });
+
+                await interaction.update({
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                return;
             }
 
             // Photo manager
@@ -1608,14 +1759,15 @@ client.on(Events.InteractionCreate, async interaction => {
 
                     await interaction.reply({
                         ephemeral: true,
-                        content: '写真を送信してください（60秒以内）。送信した画像をすべて追加します。（投稿後、Botが消します）'
+                        content: '写真を送信してください（5分以内）。送信した画像をすべて追加します。（投稿後、Botが消します）'
                     });
+                    await rememberUiReply(interaction, guildId, userId);
 
                     awaitingPhoto.set(k, {
                         postId,
                         channelId: interaction.channelId,
                         guildId,
-                        expiresAt: Date.now() + 60_000,
+                        expiresAt: Date.now() + 300_000,
                         interaction
                     });
 
@@ -1672,7 +1824,9 @@ client.on(Events.InteractionCreate, async interaction => {
                         ? detailComponentsFromMine(guildId, userId, postId) // ← これに置き換え
                         : postResultComponents(guildId, userId, postId, 1, { canEditThis: canEdit(interaction, post) });
 
-                    return interaction.update({ embeds: [detail], components });
+                    await interaction.update({ embeds: [detail], components });
+                    await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                    return;
                 }
 
                 photoView.set(k, pv);
@@ -1750,7 +1904,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-                return interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
+                await interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                return;
             }
 
             if (id.startsWith('mine:back:')) {
@@ -1758,7 +1914,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-                return renderMineList(interaction, guildId, userId, { update: true });
+                await renderMineList(interaction, guildId, userId, { update: true });
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                return;
             }
             return;
         }
@@ -1778,7 +1936,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 userIdFilter: null,
                 prefectureFilter: null,
                 keyword: '',
-                ratingFilter: null,
+                ratingFilters: [],
                 results: [],
                 idx: 0
             };
@@ -1789,7 +1947,7 @@ client.on(Events.InteractionCreate, async interaction => {
             return interaction.update({
                 content: '',
                 embeds: [searchPanelEmbed(st)],
-                components: searchPanelComponents(guildId, userId),
+                components: searchPanelComponents(guildId, userId, st),
             });
         }
 
@@ -1814,7 +1972,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.update({
                     content: picked ? `都道府県フィルタ：**${picked}**` : '都道府県フィルタを解除しました。',
                     embeds: [searchPanelEmbed(st)],
-                    components: searchPanelComponents(guildId, userId),
+                    components: searchPanelComponents(guildId, userId, st),
                 });
             }
 
@@ -1875,11 +2033,13 @@ client.on(Events.InteractionCreate, async interaction => {
             embed.setTitle(`📄 詳細  ${post.name}`.trim());
 
             // 詳細で編集できるように（自分の記録は全部自分の投稿）
-            return interaction.reply({
+            await interaction.reply({
                 ephemeral: true,
                 embeds: [embed],
                 components: detailComponentsFromMine(guildId, userId, postId),
             });
+            await rememberUiReply(interaction, guildId, userId);
+            return;
         }
 
         // Modal submit
@@ -1916,6 +2076,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
 
                 const sent = await interaction.fetchReply();
+                if (sent?.id) addUiMessageId(guildId, userId, sent.id);
                 prefPromptInteraction.set(k, sent);
                 return;
             }
@@ -1939,7 +2100,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const pref = (d?.prefecture ?? '').trim();
                 const visited = d.visited !== false;
                 const visitedDate = visited ? (d.visitedDate ?? '') : '';
-                
+
                 if (!name) {
                     return interaction.reply({ ephemeral: true, content: '店名は必須です。' });
                 }
@@ -1976,16 +2137,18 @@ client.on(Events.InteractionCreate, async interaction => {
                     postId: post.id,
                     channelId: interaction.channelId,
                     guildId,
-                    expiresAt: Date.now() + 60_000,
+                    expiresAt: Date.now() + 300_000,
                     interaction,
                 });
 
-                return interaction.reply({
+                await interaction.reply({
                     ephemeral: true,
                     content:
                         `登録しました：${post.name}\n` +
-                        '写真を送信してください（60秒以内）。送信した画像をすべて追加します。（投稿後、Botが消します）',
+                        '写真を送信してください（5分以内）。送信した画像をすべて追加します。（投稿後、Botが消します）',
                 });
+                await rememberUiReply(interaction, guildId, userId);
+                return;
             }
 
             // Edit
@@ -2039,11 +2202,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 const fromMine = cameFromMine(k, postId, mineState);
                 const { detail, components } = renderDetail(interaction, { post, guildId, userId, fromMine });
 
-                // まず画面を更新（Modalは update じゃなく reply でOK）
                 await interaction.reply({ ephemeral: true, embeds: [detail], components });
+                await rememberUiReply(interaction, guildId, userId);
 
-                // そのあと一言（任意）
-                await interaction.followUp({ ephemeral: true, content: '更新しました。' });
+                const sent = await interaction.followUp({ ephemeral: true, content: '更新しました。' });
+                if (sent?.id) addUiMessageId(guildId, userId, sent.id);
                 return;
             }
 
@@ -2059,11 +2222,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 st.keyword = keyword;
                 searchState.set(k, st);
 
-                return interaction.reply({
+                await interaction.reply({
                     ephemeral: true,
                     embeds: [searchPanelEmbed(st)],
-                    components: searchPanelComponents(guildId, userId),
+                    components: searchPanelComponents(guildId, userId, st),
                 });
+                await rememberUiReply(interaction, guildId, userId);
+                return;
             }
         }
     } catch (e) {
