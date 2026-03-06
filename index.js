@@ -962,11 +962,9 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
             .setDescription('(まだありません)');
 
         if (update) {
-            if (!interaction.deferred && !interaction.replied) {
-                await interaction.deferUpdate();
-            }
-            return interaction.editReply({ embeds: [e], components: homeComponents() });
+            return interaction.update({ embeds: [e], components: homeComponents() });
         }
+
         await interaction.reply({ ephemeral: true, embeds: [e], components: homeComponents() });
         await rememberUiReply(interaction, guildId, userId);
         return;
@@ -1005,15 +1003,11 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     const embeds = [listHeader, ...slice.map(buildCardEmbed)];
 
     if (update) {
-        if (!interaction.deferred && !interaction.replied) {
-            await interaction.deferUpdate();
-        }
-        return interaction.editReply({ embeds, components: comps });
+        return interaction.update({ embeds, components: comps });
     }
 
     await interaction.reply({ ephemeral: true, embeds, components: comps });
     await rememberUiReply(interaction, guildId, userId);
-    return;
 }
 
 function detailActionComponents(guildId, userId, postId, { fromMine = false, canEditThis = true, total = 1 } = {}) {
@@ -2407,7 +2401,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 cache.set(postId, post);
 
-                // どこ導線か判定して、詳細を再表示
                 const fromMine = cameFromMine(k, postId, mineState);
                 const { detail, components } = renderDetail(interaction, { post, guildId, userId, fromMine });
 
@@ -2417,7 +2410,17 @@ client.on(Events.InteractionCreate, async interaction => {
                     embeds: [detail],
                     components,
                 });
-                await rememberUiReply(interaction, guildId, userId);
+
+                const sent = await rememberUiReply(interaction, guildId, userId);
+
+                if (sent?.id) {
+                    setTimeout(async () => {
+                        try {
+                            await interaction.webhook.deleteMessage(sent.id);
+                        } catch { }
+                    }, 5000);
+                }
+
                 return;
             }
 
