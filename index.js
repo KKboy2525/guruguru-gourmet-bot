@@ -163,7 +163,7 @@ function stars(rating) {
 }
 
 function visitLabel(post) {
-    return post?.visited === false ? '📝 行ってない' : '✅ 行った';
+    return post?.visited === false ? '📝 行きたい' : '✅ 行った';
 }
 
 function hasRating(post) {
@@ -577,7 +577,7 @@ function visitRow(prefix, guildId, userId, postId = '') {
                 .setStyle(ButtonStyle.Primary),
             new ButtonBuilder()
                 .setCustomId(`${prefix}:planned:${guildId}:${userId}:${postId}`)
-                .setLabel('📝 行ってない')
+                .setLabel('📝 行きたい')
                 .setStyle(ButtonStyle.Secondary)
         ),
     ];
@@ -717,7 +717,7 @@ function mineListComponents(guildId, userId, page, hasPrev, hasNext, options, st
     return [
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`mine:toggleVisited:${guildId}:${userId}`).setLabel(`${st?.visitedFilterVisited ? '☑' : '☐'} 行った`).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`mine:toggleUnvisited:${guildId}:${userId}`).setLabel(`${st?.visitedFilterUnvisited ? '☑' : '☐'} 行ってない`).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`mine:toggleUnvisited:${guildId}:${userId}`).setLabel(`${st?.visitedFilterUnvisited ? '☑' : '☐'} 行きたい`).setStyle(ButtonStyle.Secondary),
         ),
         new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
@@ -1085,7 +1085,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 await interaction.reply({
                     ephemeral: true,
-                    content: 'まず「行った / 行ってない」を選んでね',
+                    content: 'まず「行った / 行きたい」を選んでね',
                     components: visitRow('visitCreate', guildId, userId),
                 });
 
@@ -1189,7 +1189,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const prevDraft = draftRating.get(k);
                 if (!prevDraft) {
-                    return interaction.reply({ ephemeral: true, content: '先に「行った / 行ってない」を選んでください。' });
+                    return interaction.reply({ ephemeral: true, content: '先に「行った / 行きたい」を選んでください。' });
                 }
 
                 draftRating.set(k, {
@@ -1449,7 +1449,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 await interaction.reply({
                     ephemeral: true,
-                    content: `まず「行った / 行ってない」を選んでね（現在: ${visitLabel(post)}）`,
+                    content: `まず「行った / 行きたい」を選んでね（現在: ${visitLabel(post)}）`,
                     components: visitRow('visitEdit', guildId, ownerId, postId),
                 });
                 
