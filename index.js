@@ -96,6 +96,18 @@ const prefPromptInteraction = new Map();
 const photoView = new Map();
 
 // ====== util ======
+async function clearEphemeralMessage(interaction) {
+    try {
+        if (interaction?.message?.id) {
+            await interaction.webhook.editMessage(interaction.message.id, {
+                content: ' ',
+                embeds: [],
+                components: [],
+            });
+        }
+    } catch { }
+}
+
 function addUiMessageId(guildId, userId, messageId) {
     const k = keyOf(guildId, userId);
     if (!uiMessages.has(k)) uiMessages.set(k, new Set());
@@ -1033,9 +1045,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const currentValue = d.visitedDate ?? '';
 
-                try {
-                    await interaction.message.delete();
-                } catch { }
+                await clearEphemeralMessage(interaction);
 
                 return interaction.showModal(
                     buildVisitedDateModal(gid, ownerId, mode, postId || '', currentValue)
@@ -1150,9 +1160,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.prefecture = '';
                 draftRating.set(k, d);
 
-                try {
-                    await interaction.message.delete();
-                } catch { }
+                await clearEphemeralMessage(interaction);
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
@@ -1958,9 +1966,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.prefecture = picked;
                 draftRating.set(k, d);
 
-                try {
-                    await interaction.message.delete();
-                } catch { }
+                await clearEphemeralMessage(interaction);
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
@@ -2032,8 +2038,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 d.visitedDate = normalized || '';
                 draftRating.set(k, d);
-
-                await clearOtherUiMessages(interaction, guildId, userId);
 
                 await interaction.reply({
                     ephemeral: true,
