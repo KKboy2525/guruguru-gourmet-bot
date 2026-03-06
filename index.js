@@ -100,22 +100,25 @@ function imageUrls(post) {
 function buildDetailEmbedsChunks(post, { sharedByUserId = null } = {}) {
     const ratingText = post.visited === false ? '' : (hasRating(post) ? stars(post.rating) : '評価なし');
 
-const top = [];
-if (ratingText) top.push(ratingText);
-if (post.comment) top.push(post.comment);
+    const top = [];
+    if (ratingText) top.push(ratingText);
+    if (post.comment) top.push(post.comment);
 
-       const head = top.length ? `${top.join('\n\n')}\n\n` : '';
+    const head = top.length ? `${top.join('\n\n')}\n\n` : '';
 
-       const info = new EmbedBuilder()
-           .setTitle(`🍽 ${post.name}`)
-           .setDescription(
-               `${head}` +
-               `🗾 ${post.prefecture ? post.prefecture : '(未設定)'}\n` +
-               `🏷 ${tagString(post.tags)}\n` +
-               `👤 登録者 <@${post.created_by}>\n` +
-               (sharedByUserId ? `📤 共有 <@${sharedByUserId}>\n` : '')
-           )
-           .addFields({ name: '🔗 Webサイト', value: post.url || '(なし)' });
+    const info = new EmbedBuilder()
+        .setTitle(`🍽 ${post.name}`)
+        .setDescription(
+            `${head}` +
+            `🗾 ${post.prefecture ? post.prefecture : '(未設定)'}\n` +
+            `🏷 ${tagString(post.tags)}\n` +
+            `👤 登録者 <@${post.created_by}>\n` +
+            (sharedByUserId ? `📤 共有 <@${sharedByUserId}>\n` : '')
+        )
+        .addFields(
+            { name: '🔗 Webサイト', value: post.url || '(なし)' },
+            { name: '📍 場所', value: post.map_url || '(なし)' }
+        );
 
     if (post.updated_at) {
         info.setFooter({ text: `更新: ${new Date(post.updated_at).toLocaleString()}` });
@@ -281,7 +284,7 @@ function buildPostEmbedForView(post, { sharedByUserId = null } = {}) {
 
     const fields = [
         { name: '🔗 Webサイト', value: post.url || '(なし)' },
-        { name: '📍 位置情報', value: post.map_url || '(なし)' },
+        { name: '📍 場所', value: post.map_url || '(なし)' },
     ];
 
     const e = new EmbedBuilder()
@@ -548,6 +551,7 @@ function buildEditModal(gid, ownerId, postId, post) {
                 .setLabel('タグ（カンマ区切り）')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(false)
+                .setPlaceholder('ラーメン, デート, 深夜')
                 .setValue((post.tags ?? []).join(', '))
         )
     );
