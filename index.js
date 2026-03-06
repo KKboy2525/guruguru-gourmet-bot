@@ -1207,6 +1207,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.prefPromptMessageId = interaction.message?.id ?? null;
                 draftRating.set(k, d);
 
+                prefPromptRef.set(k, {
+                    webhook: interaction.webhook,
+                    messageId: interaction.message?.id,
+                });
+
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
                 } else {
@@ -2028,6 +2033,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.prefecture = picked;
                 d.prefPromptMessageId = interaction.message?.id ?? null;
                 draftRating.set(k, d);
+
+                prefPromptRef.set(k, {
+                    webhook: interaction.webhook,
+                    messageId: interaction.message?.id,
+                });
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
