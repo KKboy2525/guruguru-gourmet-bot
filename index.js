@@ -592,6 +592,16 @@ function photoWaitingEmbed(name) {
         );
 }
 
+function photoAddWaitingEmbed(name) {
+    return new EmbedBuilder()
+        .setTitle('📷 写真追加')
+        .setDescription(
+            `**${name}** に写真を追加します。\n` +
+            'このチャンネルに写真を送信してください（5分以内）。\n' +
+            '送信した画像をすべて追加します。投稿後、Botが元メッセージを消します。'
+        );
+}
+
 function photoWaitingComponents() {
     return [
         new ActionRowBuilder().addComponents(
@@ -694,6 +704,27 @@ function buildEditModal(gid, ownerId, postId, post) {
     return modal;
 }
 
+async function openCreateOrEditModal(interaction, { mode, gid, ownerId, guildId, draft }) {
+    if (mode === 'create') {
+        return interaction.showModal(buildCreateModal(gid, ownerId));
+    }
+
+    const postId = draft?.postId;
+    await ensureCacheLoadedForGuild(interaction.guild);
+    const cache = getGuildCache(guildId);
+    const post = cache.get(postId);
+
+    if (!post) {
+        return interaction.reply({ ephemeral: true, content: '対象データが見つかりません。' });
+    }
+
+    if (!canEdit(interaction, post)) {
+        return interaction.reply({ ephemeral: true, content: '編集できません（投稿者のみ）。' });
+    }
+
+    return interaction.showModal(buildEditModal(gid, ownerId, postId, post));
+}
+
 function homeComponents() {
     return [
         new ActionRowBuilder().addComponents(
@@ -737,7 +768,7 @@ function prefPickComponents(mode, guildId, userId, page = 0) {
 
     const select = new StringSelectMenuBuilder()
         .setCustomId(`${mode}:prefPick:${guildId}:${userId}:${p}`)
-        .setPlaceholder(`都道府県（任意） ${p + 1}/${totalPages}`)
+        .setPlaceholder(`都道府県を選択してください。（任意） ${p + 1}/${totalPages}`)
         .setMinValues(0)
         .setMaxValues(1)
         .addOptions(slice.map(x => ({ label: x, value: x })));
@@ -770,27 +801,42 @@ function prefPickComponents(mode, guildId, userId, page = 0) {
 function searchPanelEmbed(state) {
     const userLabel = state.userIdFilter?.length
         ? state.userIdFilter.map(id => `<@${id}>`).join(' ')
-        : '(指定なし)';
-    const prefLabel = state.prefectureFilter ? state.prefectureFilter : '(指定なし)';
-    const keyword = state.keyword ? `"${state.keyword}"` : '(指定なし)';
+        : '指定なし';
+
+    const prefLabel = state.prefectureFilter || '指定なし';
+    const keywordLabel = state.keyword ? `「${state.keyword}」` : '指定なし';
     const ratingLabel = state.ratingFilters?.length
         ? state.ratingFilters.map(r => `⭐${r}`).join(' ')
-        : '(指定なし)';
+        : '指定なし';
 
-    return new EmbedBuilder().setTitle('🔎 検索').setDescription(
-        `👤 人フィルター: ${userLabel}\n` +
-        `🗾 都道府県: ${prefLabel}\n` +
-        `🔤 キーワード: ${keyword}\n` +
-        `⭐ フィルター: ${ratingLabel}`
-    );
+    return new EmbedBuilder()
+        .setTitle('🔎 検索条件')
+        .setDescription(
+            `👤 人: ${userLabel}\n` +
+            `🗾 都道府県: ${prefLabel}\n` +
+            `🔤 キーワード: ${keywordLabel}\n` +
+            `⭐ 評価: ${ratingLabel}\n\n` +
+            '条件を設定して「検索実行」を押してください。'
+        );
 }
 
 function searchPanelComponents(guildId, userId, st = {}) {
     return [
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`search:setUser:${guildId}:${userId}`).setLabel('👤 人を選ぶ').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`search:setPref:${guildId}:${userId}`).setLabel('🗾 都道府県を選ぶ').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`search:setText:${guildId}:${userId}`).setLabel('🔤 キーワード入力').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder()
+                .setCustomId(`search:setUser:${guildId}:${userId}`)
+                .setLabel('👤 人')
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:setPref:${guildId}:${userId}`)
+                .setLabel('🗾 都道府県')
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:setText:${guildId}:${userId}`)
+                .setLabel('🔤 キーワード')
+                .setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -819,38 +865,22 @@ function searchPanelComponents(guildId, userId, st = {}) {
                 .setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`search:run:${guildId}:${userId}`).setLabel('✅ 検索実行').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`search:clear:${guildId}:${userId}`).setLabel('🧹 クリア').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`search:back:${guildId}:${userId}`).setLabel('🏠 ホーム').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder()
+                .setCustomId(`search:run:${guildId}:${userId}`)
+                .setLabel('✅ 検索実行')
+                .setStyle(ButtonStyle.Primary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:clear:${guildId}:${userId}`)
+                .setLabel('🧹 条件クリア')
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:back:${guildId}:${userId}`)
+                .setLabel('🏠 ホーム')
+                .setStyle(ButtonStyle.Secondary)
         ),
     ];
-}
-
-function postResultComponents(guildId, viewerId, postId, total, { canEditThis = true } = {}) {
-    const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`res:prev:${guildId}:${viewerId}`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(total <= 1),
-        new ButtonBuilder().setCustomId(`res:next:${guildId}:${viewerId}`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(total <= 1),
-        new ButtonBuilder().setCustomId(`res:share:${guildId}:${viewerId}:${postId}`).setLabel('📤 このチャンネルに送信').setStyle(ButtonStyle.Primary)
-    );
-    const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`res:edit:${guildId}:${viewerId}:${postId}`)
-            .setLabel('✏ 編集')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(!canEditThis),
-        new ButtonBuilder()
-            .setCustomId(`res:photos:${guildId}:${viewerId}:${postId}`)
-            .setLabel('🖼 写真管理')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(!canEditThis),
-        new ButtonBuilder()
-            .setCustomId(`res:delete:${guildId}:${viewerId}:${postId}`)
-            .setLabel('🗑 削除')
-            .setStyle(ButtonStyle.Danger)
-            .setDisabled(!canEditThis),
-        new ButtonBuilder().setCustomId(`res:back:${guildId}:${viewerId}`).setLabel('🔙 戻る').setStyle(ButtonStyle.Secondary)
-    );
-    return [row1, row2];
 }
 
 function photoManagerComponents(guildId, userId, postId, hasAny) {
@@ -914,7 +944,9 @@ async function registerCommands() {
 
 // ====== 画面ヘルパ ======
 function homeEmbed() {
-    return new EmbedBuilder().setTitle('🍽 グルメ記録').setDescription('操作を選んでね');
+    return new EmbedBuilder()
+        .setTitle('🍽 グルメ記録')
+        .setDescription('操作を選択してください。');
 }
 
 async function renderMineList(interaction, guildId, userId, { update = false } = {}) {
@@ -984,35 +1016,52 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     return;
 }
 
-function detailComponentsFromMine(guildId, userId, postId) {
-    return [
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`res:share:${guildId}:${userId}:${postId}`)
-                .setLabel('📤 このチャンネルに送信')
-                .setStyle(ButtonStyle.Primary),
+function detailActionComponents(guildId, userId, postId, { fromMine = false, canEditThis = true, total = 1 } = {}) {
+    const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`res:prev:${guildId}:${userId}`)
+            .setLabel('◀')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(fromMine || total <= 1),
 
-            new ButtonBuilder()
-                .setCustomId(`res:edit:${guildId}:${userId}:${postId}`)
-                .setLabel('✏ 編集')
-                .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`res:next:${guildId}:${userId}`)
+            .setLabel('▶')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(fromMine || total <= 1),
 
-            new ButtonBuilder()
-                .setCustomId(`res:photos:${guildId}:${userId}:${postId}`)
-                .setLabel('🖼 写真管理')
-                .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`res:share:${guildId}:${userId}:${postId}`)
+            .setLabel('📤 このチャンネルに送信')
+            .setStyle(ButtonStyle.Primary)
+    );
 
-            new ButtonBuilder()
-                .setCustomId(`res:delete:${guildId}:${userId}:${postId}`)
-                .setLabel('🗑 削除')
-                .setStyle(ButtonStyle.Danger),
+    const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`res:edit:${guildId}:${userId}:${postId}`)
+            .setLabel('✏ 編集')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(!canEditThis),
 
-            new ButtonBuilder()
-                .setCustomId(`mine:back:${guildId}:${userId}`)
-                .setLabel('🔙 戻る')
-                .setStyle(ButtonStyle.Secondary)
-        ),
-    ];
+        new ButtonBuilder()
+            .setCustomId(`res:photos:${guildId}:${userId}:${postId}`)
+            .setLabel('🖼 写真管理')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(!canEditThis),
+
+        new ButtonBuilder()
+            .setCustomId(`res:delete:${guildId}:${userId}:${postId}`)
+            .setLabel('🗑 削除')
+            .setStyle(ButtonStyle.Danger)
+            .setDisabled(!canEditThis),
+
+        new ButtonBuilder()
+            .setCustomId(fromMine ? `mine:back:${guildId}:${userId}` : `res:back:${guildId}:${userId}`)
+            .setLabel('🔙 戻る')
+            .setStyle(ButtonStyle.Secondary)
+    );
+
+    return [row1, row2];
 }
 
 function cameFromMine(k, postId, mineState) {
@@ -1020,13 +1069,15 @@ function cameFromMine(k, postId, mineState) {
     return !!mine?.results?.includes(postId);
 }
 
-function renderDetail(interaction, { post, guildId, userId, fromMine }) {
+function renderDetail(interaction, { post, guildId, userId, fromMine, total = 1 }) {
     const detail = buildPostEmbedForView(post);
     detail.setTitle(`📄 詳細  ${post.name}`.trim());
 
-    const components = fromMine
-        ? detailComponentsFromMine(guildId, userId, post.id)
-        : postResultComponents(guildId, userId, post.id, 1, { canEditThis: canEdit(interaction, post) });
+    const components = detailActionComponents(guildId, userId, post.id, {
+        fromMine,
+        canEditThis: canEdit(interaction, post),
+        total,
+    });
 
     return { detail, components };
 }
@@ -1066,7 +1117,11 @@ async function renderSearchResult(interaction, guildId, userId, { update = false
 
     const payload = {
         embeds: [embed],
-        components: postResultComponents(guildId, userId, postId, st.results.length, { canEditThis: canEdit(interaction, post) }),
+        components: detailActionComponents(guildId, userId, postId, {
+            fromMine: false,
+            canEditThis: canEdit(interaction, post),
+            total: st.results.length,
+        }),
     };
 
     if (update) return interaction.update(payload);
@@ -1139,7 +1194,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 draftRating.set(k, d);
 
                 await interaction.update({
-                    content: '都道府県を選んでください（任意）',
+                    content: '都道府県を選択してください。（任意）',
                     embeds: [],
                     components: prefPickComponents(mode, gid, ownerId),
                 });
@@ -1166,7 +1221,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const select = new StringSelectMenuBuilder()
                     .setCustomId(`search:prefPick:${guildId}:${ownerId}:${p}`)
-                    .setPlaceholder(`都道府県を選んでください ${p + 1}/${totalPages}`)
+                    .setPlaceholder(`都道府県を選択してください ${p + 1}/${totalPages}`)
                     .setMinValues(0)
                     .setMaxValues(1)
                     .addOptions(slice.map(x => ({ label: x, value: x })));
@@ -1178,7 +1233,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 );
 
                 return interaction.update({
-                    content: '都道府県を選んでね',
+                    content: '都道府県を選択してください。',
                     components: [new ActionRowBuilder().addComponents(select), nav],
                 });
             }
@@ -1219,7 +1274,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 // 同じephemeralメッセージを更新する（増やさない）
                 await interaction.update({
-                    content: '都道府県を選んでください（任意）',
+                    content: '都道府県を選択してください。（任意）',
                     components: prefPickComponents(mode, gid, ownerId, next),
                 });
 
@@ -1245,44 +1300,48 @@ client.on(Events.InteractionCreate, async interaction => {
                     messageId: interaction.message?.id,
                 });
 
-                if (mode === 'create') {
-                    return interaction.showModal(buildCreateModal(gid, ownerId));
-                } else {
-                    const postId = d.postId;
-                    await ensureCacheLoadedForGuild(interaction.guild);
-                    const cache = getGuildCache(guildId);
-                    const post = cache.get(postId);
-                    if (!post) return interaction.reply({ ephemeral: true, content: '対象データが見つかりません。' });
-                    if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '編集できません（投稿者のみ）。' });
-
-                    return interaction.showModal(buildEditModal(gid, ownerId, postId, post));
-                }
+                return openCreateOrEditModal(interaction, {
+                    mode,
+                    gid,
+                    ownerId,
+                    guildId,
+                    draft: d,
+                });
             }
 
             // Home
             if (id === 'home:create') {
                 draftRating.delete(k);
 
-                await interaction.reply({
-                    ephemeral: true,
-                    content: 'まず「行った / 行きたい」を選んでね',
+                await interaction.update({
+                    content: '訪問状態を選択してください。',
+                    embeds: [],
                     components: visitRow('visitCreate', guildId, userId),
                 });
-                await rememberUiReply(interaction, guildId, userId);
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
                 return;
             }
 
-            if (id === 'home:search') {
-                const st = searchState.get(k) ?? { userIdFilter: null, prefectureFilter: null, keyword: '', results: [], idx: 0 };
-                searchState.set(k, st);
-                await interaction.reply({
-                    ephemeral: true,
-                    embeds: [searchPanelEmbed(st)],
-                    components: searchPanelComponents(guildId, userId, st),
-                });
-                await rememberUiReply(interaction, guildId, userId);
-                return;
-            }
+if (id === 'home:search') {
+    const st = searchState.get(k) ?? {
+        userIdFilter: null,
+        prefectureFilter: null,
+        keyword: '',
+        ratingFilters: [],
+        results: [],
+        idx: 0
+    };
+
+    searchState.set(k, st);
+
+    await interaction.update({
+        content: '',
+        embeds: [searchPanelEmbed(st)],
+        components: searchPanelComponents(guildId, userId, st),
+    });
+    await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+    return;
+}
 
             if (id === 'home:mine') {
                 await ensureCacheLoadedForGuild(interaction.guild);
@@ -1343,7 +1402,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     draftRating.set(k, cur);
 
                     await interaction.update({
-                        content: '都道府県を選んでください（任意）',
+                        content: '都道府県を選択してください。（任意）',
                         embeds: [],
                         components: prefPickComponents(mode, gid, ownerId),
                     });
@@ -1356,7 +1415,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
                 await interaction.update({
-                    content: '評価を選んでください',
+                    content: '評価を選択してください。',
                     embeds: [],
                     components: ratingRow(mode === 'create' ? 'rateCreate' : 'rateEdit', guildId, ownerId, postId || ''),
                 });
@@ -1392,7 +1451,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
 
                 await interaction.update({
-                    content: '訪問日を入力しますか？（任意）',
+                    content: '訪問日を入力してください。（任意）',
                     embeds: [],
                     components: visitedDateAskComponents(guildId, ownerId, mode, postId || ''),
                 });
@@ -1406,69 +1465,69 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             // Search panel
-            if (id.startsWith('search:setUser:')) {
-                const [, , gid, ownerId] = id.split(':');
-                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
-                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+if (id.startsWith('search:setUser:')) {
+    const [, , gid, ownerId] = id.split(':');
+    if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+    if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-                const row = new ActionRowBuilder().addComponents(
-                    new UserSelectMenuBuilder()
-                        .setCustomId(`search:userPick:${guildId}:${ownerId}`)
-                        .setPlaceholder('人を選んでください（任意・複数OK）')
-                        .setMinValues(0)
-                        .setMaxValues(25)
-                );
+    const row = new ActionRowBuilder().addComponents(
+        new UserSelectMenuBuilder()
+            .setCustomId(`search:userPick:${guildId}:${ownerId}`)
+            .setPlaceholder('登録者を選択してください（複数可）')
+            .setMinValues(0)
+            .setMaxValues(25)
+    );
 
-                await interaction.reply({
-                    ephemeral: true,
-                    content: '人を選んでね',
-                    components: [row],
-                });
-                await rememberUiReply(interaction, guildId, userId);
-                return;
-            }
+    await interaction.update({
+        content: '検索する登録者を選択してください。',
+        embeds: [],
+        components: [row],
+    });
 
-            if (id.startsWith('search:setPref:')) {
-                const [, , gid, ownerId] = id.split(':');
-                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
-                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+    return;
+}
 
-                const { p, totalPages, slice } = prefSlice(0);
+if (id.startsWith('search:setPref:')) {
+    const [, , gid, ownerId] = id.split(':');
+    if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+    if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-                const select = new StringSelectMenuBuilder()
-                    .setCustomId(`search:prefPick:${guildId}:${ownerId}:${p}`)
-                    .setPlaceholder(`都道府県を選んでください ${p + 1}/${totalPages}`)
-                    .setMinValues(0)
-                    .setMaxValues(1)
-                    .addOptions(slice.map(x => ({ label: x, value: x })));
+    const { p, totalPages, slice } = prefSlice(0);
 
-                const nav = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`search:prefPagePrev:${guildId}:${ownerId}:${p}`)
-                        .setLabel('◀ 前へ')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(p <= 0),
+    const select = new StringSelectMenuBuilder()
+        .setCustomId(`search:prefPick:${guildId}:${ownerId}:${p}`)
+        .setPlaceholder(`都道府県を選択してください ${p + 1}/${totalPages}`)
+        .setMinValues(0)
+        .setMaxValues(1)
+        .addOptions(slice.map(x => ({ label: x, value: x })));
 
-                    new ButtonBuilder()
-                        .setCustomId(`search:prefPageNext:${guildId}:${ownerId}:${p}`)
-                        .setLabel('次へ ▶')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(p >= totalPages - 1),
+    const nav = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`search:prefPagePrev:${guildId}:${ownerId}:${p}`)
+            .setLabel('◀ 前へ')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(p <= 0),
 
-                    new ButtonBuilder()
-                        .setCustomId(`search:prefPageClear:${guildId}:${ownerId}`)
-                        .setLabel('解除')
-                        .setStyle(ButtonStyle.Secondary),
-                );
+        new ButtonBuilder()
+            .setCustomId(`search:prefPageNext:${guildId}:${ownerId}:${p}`)
+            .setLabel('次へ ▶')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(p >= totalPages - 1),
 
-                await interaction.reply({
-                    ephemeral: true,
-                    content: '都道府県を選んでね',
-                    components: [new ActionRowBuilder().addComponents(select), nav],
-                });
-                await rememberUiReply(interaction, guildId, userId);
-                return;
-            }
+        new ButtonBuilder()
+            .setCustomId(`search:prefPageClear:${guildId}:${ownerId}`)
+            .setLabel('解除')
+            .setStyle(ButtonStyle.Secondary),
+    );
+
+    await interaction.update({
+        content: '都道府県を選択してください。',
+        embeds: [],
+        components: [new ActionRowBuilder().addComponents(select), nav],
+    });
+
+    return;
+}
 
             if (id.startsWith('search:setText:')) {
                 const [, , gid, ownerId] = id.split(':');
@@ -1482,7 +1541,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId('keyword')
-                            .setLabel('キーワード（スペース区切りで複数検索：店名/都道府県/コメント/タグ）')
+                            .setLabel('キーワード（スペース区切り）')
                             .setPlaceholder('例：ラーメン 東京 深夜')
                             .setStyle(TextInputStyle.Short)
                             .setRequired(false)
@@ -1677,11 +1736,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません。' });
                 if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '編集できません（投稿者のみ）。' });
 
-                await interaction.reply({
-                    ephemeral: true,
-                    content: `まず「行った / 行きたい」を選んでね（現在: ${visitLabel(post)}）`,
-                    components: visitRow('visitEdit', guildId, ownerId, postId),
-                });
+await interaction.reply({
+    ephemeral: true,
+    content: `訪問状態を選択してください。（現在: ${visitLabel(post)}）`,
+    components: visitRow('visitEdit', guildId, ownerId, postId),
+});
                 await rememberUiReply(interaction, guildId, userId);
                 return;
             }
@@ -1830,18 +1889,23 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 if (action === 'add') {
 
-                    await interaction.reply({
-                        ephemeral: true,
-                        content: '写真を送信してください（5分以内）。送信した画像をすべて追加します。（投稿後、Botが消します）'
-                    });
-                    await rememberUiReply(interaction, guildId, userId);
+                    const waitPayload = {
+                        content: '',
+                        embeds: [photoAddWaitingEmbed(post.name)],
+                        components: photoWaitingComponents(),
+                    };
+
+                    await interaction.update(waitPayload);
 
                     awaitingPhoto.set(k, {
                         postId,
                         channelId: interaction.channelId,
                         guildId,
                         expiresAt: Date.now() + 300_000,
-                        interaction
+                        uiMessageRef: {
+                            webhook: interaction.webhook,
+                            messageId: interaction.message?.id,
+                        },
                     });
 
                     return;
@@ -1893,9 +1957,11 @@ client.on(Events.InteractionCreate, async interaction => {
                     const mine = mineState.get(k);
                     const fromMine = mine?.results?.includes(postId);
 
-                    const components = fromMine
-                        ? detailComponentsFromMine(guildId, userId, postId) // ← これに置き換え
-                        : postResultComponents(guildId, userId, postId, 1, { canEditThis: canEdit(interaction, post) });
+                    const components = detailActionComponents(guildId, userId, postId, {
+                        fromMine,
+                        canEditThis: canEdit(interaction, post),
+                        total: fromMine ? 1 : 1,
+                    });
 
                     await interaction.update({ embeds: [detail], components });
                     await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
@@ -2043,7 +2109,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 // セレクトUIを閉じて、検索パネルを更新
                 return interaction.update({
-                    content: picked ? `都道府県フィルタ：**${picked}**` : '都道府県フィルタを解除しました。',
+                    content: picked ? `都道府県を **${picked}** に設定しました。` : '都道府県を解除しました。',
                     embeds: [searchPanelEmbed(st)],
                     components: searchPanelComponents(guildId, userId, st),
                 });
@@ -2072,19 +2138,13 @@ client.on(Events.InteractionCreate, async interaction => {
                     messageId: interaction.message?.id,
                 });
 
-                if (mode === 'create') {
-                    return interaction.showModal(buildCreateModal(gid, ownerId));
-                }
-                else {
-                    const postId = d.postId;
-                    await ensureCacheLoadedForGuild(interaction.guild);
-                    const cache = getGuildCache(guildId);
-                    const post = cache.get(postId);
-                    if (!post) return interaction.reply({ ephemeral: true, content: '対象データが見つかりません。' });
-                    if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '編集できません（投稿者のみ）。' });
-
-                    return interaction.showModal(buildEditModal(gid, ownerId, postId, post));
-                }
+                return openCreateOrEditModal(interaction, {
+                    mode,
+                    gid,
+                    ownerId,
+                    guildId,
+                    draft: d,
+                });
             }
 
             if (!id.startsWith('mine:pick:')) return;
@@ -2104,11 +2164,14 @@ client.on(Events.InteractionCreate, async interaction => {
             const embed = buildPostEmbedForView(post);
             embed.setTitle(`📄 詳細  ${post.name}`.trim());
 
-            // 詳細で編集できるように（自分の記録は全部自分の投稿）
             await interaction.reply({
                 ephemeral: true,
                 embeds: [embed],
-                components: detailComponentsFromMine(guildId, userId, postId),
+                components: detailActionComponents(guildId, userId, postId, {
+                    fromMine: true,
+                    canEditThis: true,
+                    total: 1,
+                }),
             });
             await rememberUiReply(interaction, guildId, userId);
             return;
@@ -2150,7 +2213,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const visitedRef = visitedDatePromptRef.get(k);
 
                 const updated = await editPromptRef(visitedRef, {
-                    content: '都道府県を選んでください（任意）',
+                    content: '都道府県を選択してください。（任意）',
                     embeds: [],
                     components: prefPickComponents(mode, gid, ownerId),
                 });
@@ -2170,7 +2233,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 // 更新できなかったときだけ新しく出す
                 await interaction.editReply({
-                    content: '都道府県を選んでください（任意）',
+                    content: '都道府県を選択してください。（任意）',
                     embeds: [],
                     components: prefPickComponents(mode, gid, ownerId),
                 });
