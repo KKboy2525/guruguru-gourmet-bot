@@ -1028,7 +1028,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const d = draftRating.get(k);
                 if (!d || d.mode !== mode) {
-                    return interaction.reply({ ephemeral: true, content: '途中状態がありません。最初からやり直して。' });
+                    return interaction.reply({ ephemeral: true, content: '途中状態がありません。最初からやり直してください。' });
                 }
 
                 const currentValue = d.visitedDate ?? '';
@@ -1322,6 +1322,8 @@ client.on(Events.InteractionCreate, async interaction => {
                         components: [],
                     });
                 } catch { }
+
+                await clearOtherUiMessages(interaction, guildId, userId);
 
                 await interaction.reply({
                     ephemeral: true,
@@ -2060,14 +2062,18 @@ client.on(Events.InteractionCreate, async interaction => {
                 const normalized = normalizeVisitedDate(raw);
 
                 if (normalized === null) {
-                    return interaction.reply({
+                    const sent = await interaction.followUp({
                         ephemeral: true,
                         content: '訪問日は YYYY/MM/DD または YYYY-MM-DD 形式で入力してください。',
                     });
+                    if (sent?.id) addUiMessageId(guildId, userId, sent.id);
+                    return;
                 }
 
                 d.visitedDate = normalized || '';
                 draftRating.set(k, d);
+
+                await clearOtherUiMessages(interaction, guildId, userId);
 
                 await interaction.reply({
                     ephemeral: true,
@@ -2236,6 +2242,7 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.isRepliable()) {
             try {
                 await interaction.reply({ ephemeral: true, content: `エラー: ${e.message}` });
+                await rememberUiReply(interaction, guildId, userId);
             } catch { }
         }
     }
