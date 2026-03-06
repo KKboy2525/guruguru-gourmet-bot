@@ -98,23 +98,35 @@ function imageUrls(post) {
 }
 
 function buildDetailEmbedsChunks(post, { sharedByUserId = null } = {}) {
-    const ratingText = post.visited === false ? '' : (hasRating(post) ? stars(post.rating) : '評価なし');
-
     const top = [];
-    if (ratingText) top.push(ratingText);
-    if (post.comment) top.push(post.comment);
 
-    const head = top.length ? `${top.join('\n\n')}\n\n` : '';
+    // 行った / 行きたい
+    top.push(visitLabel(post));
+
+    // 行った時だけ評価
+    if (post.visited !== false) {
+        top.push(hasRating(post) ? stars(post.rating) : '評価なし');
+    }
+
+    // コメント
+    if (post.comment) {
+        top.push('');
+        top.push(post.comment);
+    }
+
+    const body = [
+        ...top,
+        '',
+        `🗾 ${post.prefecture ? post.prefecture : '(未設定)'}`,
+        ...(post.visited !== false && post.visited_date ? [`📅 ${post.visited_date}`] : []),
+        `🏷 ${tagString(post.tags)}`,
+        `👤 登録者 <@${post.created_by}>`,
+        ...(sharedByUserId ? [`📤 共有 <@${sharedByUserId}>`] : []),
+    ].join('\n');
 
     const info = new EmbedBuilder()
         .setTitle(`🍽 ${post.name}`)
-        .setDescription(
-            `${head}` +
-            `🗾 ${post.prefecture ? post.prefecture : '(未設定)'}\n` +
-            `🏷 ${tagString(post.tags)}\n` +
-            `👤 登録者 <@${post.created_by}>\n` +
-            (sharedByUserId ? `📤 共有 <@${sharedByUserId}>\n` : '')
-        )
+        .setDescription(body)
         .addFields(
             { name: '🔗 Webサイト', value: post.url || '(なし)' },
             { name: '📍 場所', value: post.map_url || '(なし)' }
