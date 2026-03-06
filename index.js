@@ -2044,8 +2044,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
             if (id.startsWith('modalVisitedDate:')) {
                 const [, gid, ownerId, mode, postId] = id.split(':');
-                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
-                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+                }
 
                 const d = draftRating.get(k);
                 if (!d || d.mode !== mode) {
@@ -2056,22 +2060,24 @@ client.on(Events.InteractionCreate, async interaction => {
                 const normalized = normalizeVisitedDate(raw);
 
                 if (normalized === null) {
-                    await interaction.reply({
+                    return interaction.reply({
                         ephemeral: true,
                         content: '訪問日は YYYY/MM/DD または YYYY-MM-DD 形式で入力してください。',
                     });
-                    await rememberUiReply(interaction, guildId, userId);
-                    return;
                 }
+
+                // 先にACKしてモーダルを安全に閉じる
+                await interaction.deferReply({ ephemeral: true });
 
                 d.visitedDate = normalized || '';
                 draftRating.set(k, d);
 
+                // 「訪問日を入力しますか？」メッセージを消す
                 await blankMessageById(interaction, d.visitedDatePromptMessageId);
 
-                await interaction.reply({
-                    ephemeral: true,
+                await interaction.editReply({
                     content: '都道府県を選んでください（任意）',
+                    embeds: [],
                     components: prefPickComponents(mode, gid, ownerId),
                 });
 
@@ -2081,7 +2087,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     d.prefPromptMessageId = sent.id;
                     draftRating.set(k, d);
                 }
-                prefPromptInteraction.set(k, sent);
+
                 return;
             }
 
