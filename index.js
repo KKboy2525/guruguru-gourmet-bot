@@ -1034,11 +1034,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const currentValue = d.visitedDate ?? '';
 
                 try {
-                    await interaction.message.edit({
-                        content: '訪問日入力を開いています...',
-                        embeds: [],
-                        components: [],
-                    });
+                    await interaction.message.delete();
                 } catch { }
 
                 return interaction.showModal(
@@ -1059,20 +1055,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.visitedDate = '';
                 draftRating.set(k, d);
 
-                try {
-                    await interaction.message.edit({
-                        content: '訪問日：未設定',
-                        embeds: [],
-                        components: [],
-                    });
-                } catch { }
-
-                const sent = await interaction.reply({
-                    ephemeral: true,
+                await interaction.update({
                     content: '都道府県を選んでください（任意）',
+                    embeds: [],
                     components: prefPickComponents(mode, gid, ownerId),
                 });
-                await rememberUiReply(interaction, guildId, userId);
                 return;
             }
 
@@ -1164,16 +1151,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 draftRating.set(k, d);
 
                 try {
-                    await interaction.message.edit({
-                        content: '都道府県：未設定\n入力フォームを開くよ',
-                        embeds: [],
-                        components: [],
-                    });
+                    await interaction.message.delete();
                 } catch { }
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
-                } else {
+                }
+                else {
                     const postId = d.postId;
                     await ensureCacheLoadedForGuild(interaction.guild);
                     const cache = getGuildCache(guildId);
@@ -1261,30 +1245,20 @@ client.on(Events.InteractionCreate, async interaction => {
                     channelId: interaction.channelId,
                 });
 
-                try {
-                    await interaction.message.edit({
-                        content: '行った / 行きたい を選択済み',
-                        embeds: [],
-                        components: [],
-                    });
-                } catch { }
-
                 if (!visited) {
-                    await interaction.reply({
-                        ephemeral: true,
+                    await interaction.update({
                         content: '都道府県を選んでください（任意）',
+                        embeds: [],
                         components: prefPickComponents(mode, gid, ownerId),
                     });
-                    await rememberUiReply(interaction, guildId, userId);
                     return;
                 }
 
-                await interaction.reply({
-                    ephemeral: true,
-                    content: '評価を選んでね',
+                await interaction.update({
+                    content: '評価を選んでください',
+                    embeds: [],
                     components: ratingRow(mode === 'create' ? 'rateCreate' : 'rateEdit', guildId, ownerId, postId || ''),
                 });
-                await rememberUiReply(interaction, guildId, userId);
                 return;
             }
 
@@ -1315,22 +1289,11 @@ client.on(Events.InteractionCreate, async interaction => {
                     channelId: interaction.channelId,
                 });
 
-                try {
-                    await interaction.message.edit({
-                        content: '評価を選択済み',
-                        embeds: [],
-                        components: [],
-                    });
-                } catch { }
-
-                await clearOtherUiMessages(interaction, guildId, userId);
-
-                await interaction.reply({
-                    ephemeral: true,
+                await interaction.update({
                     content: '訪問日を入力しますか？（任意）',
+                    embeds: [],
                     components: visitedDateAskComponents(guildId, ownerId, mode, postId || ''),
                 });
-                await rememberUiReply(interaction, guildId, userId);
                 return;
             }
 
@@ -1996,16 +1959,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 draftRating.set(k, d);
 
                 try {
-                    await interaction.message.edit({
-                        content: picked ? `都道府県：**${picked}**\n入力フォームを開くよ` : '都道府県：未設定\n入力フォームを開くよ',
-                        components: [],
-                        embeds: [],
-                    });
+                    await interaction.message.delete();
                 } catch { }
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
-                } else {
+                }
+                else {
                     const postId = d.postId;
                     await ensureCacheLoadedForGuild(interaction.guild);
                     const cache = getGuildCache(guildId);
@@ -2062,11 +2022,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 const normalized = normalizeVisitedDate(raw);
 
                 if (normalized === null) {
-                    const sent = await interaction.followUp({
+                    await interaction.reply({
                         ephemeral: true,
                         content: '訪問日は YYYY/MM/DD または YYYY-MM-DD 形式で入力してください。',
                     });
-                    if (sent?.id) addUiMessageId(guildId, userId, sent.id);
+                    await rememberUiReply(interaction, guildId, userId);
                     return;
                 }
 
