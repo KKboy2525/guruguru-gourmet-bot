@@ -1071,8 +1071,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const currentValue = d.visitedDate ?? '';
 
-                await clearEphemeralMessage(interaction);
-
                 return interaction.showModal(
                     buildVisitedDateModal(gid, ownerId, mode, postId || '', currentValue)
                 );
@@ -1089,6 +1087,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 d.visitedDate = '';
+                d.prefPromptMessageId = interaction.message?.id ?? null;
                 draftRating.set(k, d);
 
                 await interaction.update({
@@ -1184,9 +1183,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 d.prefecture = '';
+                d.prefPromptMessageId = interaction.message?.id ?? null;
                 draftRating.set(k, d);
-
-                await blankCurrentMessage(interaction);
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
@@ -1276,9 +1274,15 @@ client.on(Events.InteractionCreate, async interaction => {
                     prefecture: existingPrefecture,
                     visitedDate: existingVisitedDate,
                     channelId: interaction.channelId,
+                    visitedDatePromptMessageId: null,
+                    prefPromptMessageId: !visited ? (interaction.message?.id ?? null) : null,
                 });
 
                 if (!visited) {
+                    const cur = draftRating.get(k) ?? {};
+                    cur.prefPromptMessageId = interaction.message?.id ?? null;
+                    draftRating.set(k, cur);
+
                     await interaction.update({
                         content: '都道府県を選んでください（任意）',
                         embeds: [],
@@ -1286,7 +1290,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                     return;
                 }
-
                 await interaction.update({
                     content: '評価を選んでください',
                     embeds: [],
@@ -1990,13 +1993,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 d.prefecture = picked;
+                d.prefPromptMessageId = interaction.message?.id ?? null;
                 draftRating.set(k, d);
-
-                await blankCurrentMessage(interaction);
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
-                } else {
+                }
+                else {
                     const postId = d.postId;
                     await ensureCacheLoadedForGuild(interaction.guild);
                     const cache = getGuildCache(guildId);
@@ -2064,7 +2067,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.visitedDate = normalized || '';
                 draftRating.set(k, d);
 
-                // 「訪問日を入力しますか？」のメッセージを消す
                 await blankMessageById(interaction, d.visitedDatePromptMessageId);
 
                 await interaction.reply({
@@ -2074,7 +2076,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
 
                 const sent = await interaction.fetchReply();
-                if (sent?.id) addUiMessageId(guildId, userId, sent.id);
+                if (sent?.id) {
+                    addUiMessageId(guildId, userId, sent.id);
+                    d.prefPromptMessageId = sent.id;
+                    draftRating.set(k, d);
+                }
                 prefPromptInteraction.set(k, sent);
                 return;
             }
@@ -2089,6 +2095,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (!d || d.mode !== 'create') {
                     return interaction.reply({ ephemeral: true, content: '評価が未選択です。もう一度やり直してください。' });
                 }
+
+                await blankMessageById(interaction, d.prefPromptMessageId);
 
                 const name = interaction.fields.getTextInputValue('name')?.trim();
                 const comment = interaction.fields.getTextInputValue('comment')?.trim();
@@ -2165,6 +2173,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (!d || d.mode !== 'edit' || d.postId !== postId) {
                     return interaction.reply({ ephemeral: true, content: '評価選択が未完了です。もう一度やり直してください。' });
                 }
+
+                await blankMessageById(interaction, d.prefPromptMessageId);
 
                 const name = interaction.fields.getTextInputValue('name')?.trim();
                 const comment = interaction.fields.getTextInputValue('comment')?.trim();
@@ -2337,7 +2347,7 @@ console.log("LOGIN START");
 client.login(TOKEN).catch(e => {
     console.error('client.login failed:', e);
     process.exit(1);
-}); ti
+});
 
 const app = express();
 app.get("/", (req, res) => res.send("Bot is running"));
