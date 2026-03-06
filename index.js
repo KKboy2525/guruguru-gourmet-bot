@@ -2145,15 +2145,37 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.visitedDate = normalized || '';
                 draftRating.set(k, d);
 
-                // modalの返答をまず作る
-                await interaction.reply({
-                    ephemeral: true,
+                await interaction.deferReply({ ephemeral: true });
+
+                const visitedRef = visitedDatePromptRef.get(k);
+
+                const updated = await editPromptRef(visitedRef, {
                     content: '都道府県を選んでください（任意）',
                     embeds: [],
                     components: prefPickComponents(mode, gid, ownerId),
                 });
 
-                const sent = await interaction.fetchReply();
+                if (updated) {
+                    prefPromptRef.set(k, visitedRef);
+                    d.prefPromptMessageId = visitedRef?.messageId ?? null;
+                    draftRating.set(k, d);
+
+                    visitedDatePromptRef.delete(k);
+
+                    try {
+                        await interaction.deleteReply();
+                    } catch { }
+                    return;
+                }
+
+                // 更新できなかったときだけ新しく出す
+                await interaction.editReply({
+                    content: '都道府県を選んでください（任意）',
+                    embeds: [],
+                    components: prefPickComponents(mode, gid, ownerId),
+                });
+
+                const sent = await interaction.fetchReply().catch(() => null);
                 if (sent?.id) {
                     addUiMessageId(guildId, userId, sent.id);
 
@@ -2166,10 +2188,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     draftRating.set(k, d);
                 }
 
-                // 最後に、直前の「訪問日を入力しますか？」を空にする
-                await blankPromptRef(visitedDatePromptRef.get(k));
                 visitedDatePromptRef.delete(k);
-
                 return;
             }
 
@@ -2227,6 +2246,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 await sent.edit({ embeds: [buildPostEmbedForDb(post)] });
                 cache.set(post.id, post);
 
+                await interaction.deferReply({ ephemeral: true });
+
                 const photoPayload = {
                     content: '',
                     embeds: [photoWaitingEmbed(post.name)],
@@ -2237,14 +2258,15 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 if (updated) {
                     if (prefRef?.messageId) addUiMessageId(guildId, userId, prefRef.messageId);
-                } else {
-                    await interaction.reply({
-                        ephemeral: true,
-                        ...photoPayload,
-                    });
-                    await rememberUiReply(interaction, guildId, userId);
-                }
 
+                    try {
+                        await interaction.deleteReply();
+                    } catch { }
+                } else {
+                    await interaction.editReply(photoPayload);
+                    const sent = await interaction.fetchReply().catch(() => null);
+                    if (sent?.id) addUiMessageId(guildId, userId, sent.id);
+                }
                 // 写真追加待ち
                 awaitingPhoto.set(k, {
                     postId: post.id,
