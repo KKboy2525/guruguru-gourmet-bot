@@ -84,9 +84,6 @@ const mineState = new Map();
 // { postId, channelId, guildId, expiresAt, uiMessageId?:string }
 const awaitingPhoto = new Map();
 
-// 評価メッセージ保存
-const ratingPromptInteraction = new Map();
-
 // 都道府県ピッカーのメッセージを消す用
 const prefPromptInteraction = new Map();
 
@@ -1167,24 +1164,17 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
-                const sent = await interaction.followUp({
+                await interaction.followUp({
                     ephemeral: true,
                     content: '評価を選んでね',
                     components: ratingRow(mode === 'create' ? 'rateCreate' : 'rateEdit', guildId, ownerId, postId || ''),
                 });
-                ratingPromptInteraction.set(k, sent);
-                return;
-            }
+                return;            }
 
             // rating
             if (id.startsWith('rateCreate:') || id.startsWith('rateEdit:')) {
-                const prev = ratingPromptInteraction.get(k);
-                if (prev) {
-                    try { await prev.delete(); } catch {}
-                    ratingPromptInteraction.delete(k);
-                }
-
                 const [prefix, ratingStr, gid, ownerId, postId] = id.split(':');
+
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
@@ -1208,9 +1198,10 @@ client.on(Events.InteractionCreate, async interaction => {
                     channelId: interaction.channelId,
                 });
 
+                // 押した評価メッセージを消す
                 try {
                     await interaction.deferUpdate();
-                    await interaction.message.delete().catch(() => {});
+                    await interaction.deleteReply();
                 } catch {}
 
                 await interaction.followUp({
