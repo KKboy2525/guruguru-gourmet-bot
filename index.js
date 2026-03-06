@@ -61,7 +61,15 @@ const cacheByGuild = new Map();
 const cacheReadyByGuild = new Map();
 
 // 新規/編集の「星→Modal」繋ぎ
-// key: guildId:userId -> { mode:'create'|'edit', postId?:string|null, visited:boolean, rating:number|null, channelId:string, prefecture?:string }
+// key: guildId:userId -> {
+//   mode:'create'|'edit',
+//   postId?:string|null,
+//   visited:boolean,
+//   rating:number|null,
+//   channelId:string,
+//   prefecture?:string,
+//   visitedDate?:string
+// }
 const draftRating = new Map();
 
 // 検索状態 key: guildId:userId
@@ -110,7 +118,7 @@ if (post.comment) top.push(post.comment);
                `👤 登録者 <@${post.created_by}>\n` +
                (sharedByUserId ? `📤 共有 <@${sharedByUserId}>\n` : '')
            )
-           .addFields({ name: '🔗 URL', value: post.url || '(なし)' });
+           .addFields({ name: '🔗 Webサイト', value: post.url || '(なし)' });
 
     if (post.updated_at) {
         info.setFooter({ text: `更新: ${new Date(post.updated_at).toLocaleString()}` });
@@ -176,7 +184,29 @@ function visitFilterMatch(state, post) {
 }
 
 function normalizeVisitedDate(raw) {
-    return (raw ?? '').trim();
+    const s = (raw ?? '').trim();
+    if (!s) return '';
+
+    // YYYY-MM-DD → YYYY/MM/DD に寄せる
+    const m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+    if (!m) return null;
+
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+
+    const dt = new Date(y, mo - 1, d);
+    if (
+        dt.getFullYear() !== y ||
+        dt.getMonth() !== mo - 1 ||
+        dt.getDate() !== d
+    ) {
+        return null;
+    }
+
+    const mm = String(mo).padStart(2, '0');
+    const dd = String(d).padStart(2, '0');
+    return `${y}/${mm}/${dd}`;
 }
 
 function parseTags(raw) {
@@ -253,7 +283,7 @@ function buildPostEmbedForView(post, { sharedByUserId = null } = {}) {
     }
 
     const fields = [
-        { name: '🔗 URL', value: post.url || '(なし)' },
+        { name: '🔗 Webサイト', value: post.url || '(なし)' },
         { name: '📍 位置情報', value: post.map_url || '(なし)' },
     ];
 
@@ -295,7 +325,7 @@ function buildPostEmbed(post, { sharedByUserId = null } = {}) {
             (sharedByUserId ? `📤 共有 <@${sharedByUserId}>\n` : '') +
             `\n${DATA_MARK}${JSON.stringify(post)}`
         )
-        .addFields({ name: '🔗 URL', value: post.url || '(なし)' })
+        .addFields({ name: '🔗 Webサイト', value: post.url || '(なし)' })
         .setFooter({ text: `ID: ${post.id}  更新: ${new Date(post.updated_at).toLocaleString()}` });
 
     // 詳細は最後の画像をメインに
@@ -438,6 +468,41 @@ function prefSlice(page = 0) {
 }
 
 // ====== UI builders ======
+function buildVisitedDateModal(gid, ownerId, mode, postId = '', currentValue = '') {
+    const modal = new ModalBuilder()
+        .setCustomId(`modalVisitedDate:${gid}:${ownerId}:${mode}:${postId || ''}`)
+        .setTitle('📅 訪問日（任意）');
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId('visitedDate')
+                .setLabel('訪問日（任意）')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setPlaceholder('2026/03/06 または 2026-03-06')
+                .setValue(currentValue ?? '')
+        )
+    );
+
+    return modal;
+}
+
+function visitedDateAskComponents(guildId, userId, mode, postId = '') {
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`date:input:${guildId}:${userId}:${mode}:${postId}`)
+                .setLabel('📅 訪問日を入力')
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`date:skip:${guildId}:${userId}:${mode}:${postId}`)
+                .setLabel('スキップ')
+                .setStyle(ButtonStyle.Secondary)
+        ),
+    ];
+}
+
 function buildCreateModal(gid, ownerId) {
     const modal = new ModalBuilder().setCustomId(`modalCreate:${gid}:${ownerId}`).setTitle('➕ 新規記録');
     modal.addComponents(
@@ -448,13 +513,18 @@ function buildCreateModal(gid, ownerId) {
             new TextInputBuilder().setCustomId('comment').setLabel('コメント').setStyle(TextInputStyle.Paragraph).setRequired(false)
         ),
         new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('url').setLabel('URL').setStyle(TextInputStyle.Short).setRequired(false)
+            new TextInputBuilder().setCustomId('url').setLabel('Webサイト').setStyle(TextInputStyle.Short).setRequired(false)
         ),
         new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('mapUrl').setLabel('📍 GoogleMapリンク').setStyle(TextInputStyle.Short).setRequired(false)
         ),
         new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('visitedDate').setLabel('行った日付（任意）').setStyle(TextInputStyle.Short).setRequired(false)
+            new TextInputBuilder()
+                .setCustomId('tags')
+                .setLabel('タグ（カンマ区切り）')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setPlaceholder('ラーメン, デート, 深夜')
         )
     );
     return modal;
@@ -470,13 +540,18 @@ function buildEditModal(gid, ownerId, postId, post) {
             new TextInputBuilder().setCustomId('comment').setLabel('コメント').setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(post.comment ?? '')
         ),
         new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('url').setLabel('URL').setStyle(TextInputStyle.Short).setRequired(false).setValue(post.url ?? '')
+            new TextInputBuilder().setCustomId('url').setLabel('Webサイト').setStyle(TextInputStyle.Short).setRequired(false).setValue(post.url ?? '')
         ),
         new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('mapUrl').setLabel('📍 GoogleMapリンク').setStyle(TextInputStyle.Short).setRequired(false).setValue(post.map_url ?? '')
         ),
         new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('visitedDate').setLabel('行った日付（任意）').setStyle(TextInputStyle.Short).setRequired(false).setValue(post.visited_date ?? '')
+            new TextInputBuilder()
+                .setCustomId('tags')
+                .setLabel('タグ（カンマ区切り）')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setValue((post.tags ?? []).join(', '))
         )
     );
     return modal;
@@ -861,6 +936,47 @@ client.on(Events.InteractionCreate, async interaction => {
         // Buttons
         if (interaction.isButton()) {
             const id = interaction.customId;
+            
+            if (id.startsWith('date:input:')) {
+                const [, action, gid, ownerId, mode, postId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({ ephemeral: true, content: '途中状態がありません。最初からやり直して。' });
+                }
+
+                const currentValue = d.visitedDate ?? '';
+                return interaction.showModal(buildVisitedDateModal(gid, ownerId, mode, postId || '', currentValue));
+            }
+
+            if (id.startsWith('date:skip:')) {
+                const [, action, gid, ownerId, mode, postId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({ ephemeral: true, content: '途中状態がありません。最初からやり直して。' });
+                }
+
+                d.visitedDate = '';
+                draftRating.set(k, d);
+
+                try {
+                    await interaction.deferUpdate();
+                    await interaction.deleteReply();
+                } catch {}
+
+                await interaction.followUp({
+                    ephemeral: true,
+                    content: '都道府県を選んでください（任意）',
+                    components: prefPickComponents(mode, gid, ownerId),
+                });
+                return;
+            }
+            
             if (id.startsWith('search:prefPagePrev:') || id.startsWith('search:prefPageNext:')) {
                 const parts = id.split(':');
                 const gid = parts[2];
@@ -926,14 +1042,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const next = id.includes('prefPageNext') ? page + 1 : page - 1;
 
-                // ★同じephemeralメッセージを更新する（増やさない）
+                // 同じephemeralメッセージを更新する（増やさない）
                 await interaction.update({
                     content: '都道府県を選んでください（任意）',
                     components: prefPickComponents(mode, gid, ownerId, next),
                 });
 
-                // この interaction でも deleteReply できるように保存（最新に更新）
-                prefPromptInteraction.set(k, interaction);
                 return;
             }
 
@@ -949,10 +1063,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 d.prefecture = '';
                 draftRating.set(k, d);
-
-                // 都道府県ピッカーのephemeralメッセージを消す
-                const prevPref = prefPromptInteraction.get(k);
-                if (prevPref) { try { await prevPref.deleteReply(); } catch { } prefPromptInteraction.delete(k); }
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
@@ -1011,52 +1121,68 @@ client.on(Events.InteractionCreate, async interaction => {
             if (id.startsWith('visitCreate:') || id.startsWith('visitEdit:')) {
                 const [prefix, kind, gid, ownerId, postId] = id.split(':');
 
-                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
-                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+                }
 
                 const visited = kind === 'visited';
                 const mode = prefix === 'visitCreate' ? 'create' : 'edit';
+
+                let existingVisitedDate = '';
+                let existingPrefecture = '';
+
+                if (mode === 'edit' && postId) {
+                    await ensureCacheLoadedForGuild(interaction.guild);
+                    const cache = getGuildCache(guildId);
+                    const oldPost = cache.get(postId);
+                    existingVisitedDate = oldPost?.visited_date ?? '';
+                    existingPrefecture = oldPost?.prefecture ?? '';
+                }
 
                 draftRating.set(k, {
                     mode,
                     postId: mode === 'edit' ? (postId || null) : null,
                     visited,
                     rating: null,
-                    prefecture: '',
+                    prefecture: existingPrefecture,
+                    visitedDate: existingVisitedDate,
                     channelId: interaction.channelId,
                 });
 
                 try {
-                    await interaction.message.edit({
-                        content: '選択を受け付けました。',
-                        components: [],
-                        embeds: []
-                    });
+                    await interaction.deferUpdate();
+                    await interaction.deleteReply();
                 } catch {}
 
                 if (!visited) {
-                    await interaction.reply({
+                    const sent = await interaction.followUp({
                         ephemeral: true,
                         content: '都道府県を選んでください（任意）',
                         components: prefPickComponents(mode, guildId, ownerId),
                     });
-                    prefPromptInteraction.set(k, interaction);
+                    prefPromptInteraction.set(k, sent);
                     return;
                 }
 
-                await interaction.reply({
+                const sent = await interaction.followUp({
                     ephemeral: true,
                     content: '評価を選んでね',
                     components: ratingRow(mode === 'create' ? 'rateCreate' : 'rateEdit', guildId, ownerId, postId || ''),
                 });
-                ratingPromptInteraction.set(k, interaction);
+                ratingPromptInteraction.set(k, sent);
                 return;
             }
 
             // rating
             if (id.startsWith('rateCreate:') || id.startsWith('rateEdit:')) {
                 const prev = ratingPromptInteraction.get(k);
-                if (prev) { try { await prev.deleteReply(); } catch { } ratingPromptInteraction.delete(k); }
+                if (prev) {
+                    try { await prev.delete(); } catch {}
+                    ratingPromptInteraction.delete(k);
+                }
 
                 const [prefix, ratingStr, gid, ownerId, postId] = id.split(':');
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
@@ -1078,20 +1204,20 @@ client.on(Events.InteractionCreate, async interaction => {
                     visited: prevDraft.visited,
                     rating,
                     prefecture: prevDraft.prefecture ?? '',
+                    visitedDate: prevDraft.visitedDate ?? '',
                     channelId: interaction.channelId,
                 });
 
-                // クリック元の星メッセージは片付け
-                try { await interaction.message.edit({ content: '評価を受け付けました。', components: [], embeds: [] }); } catch { }
+                try {
+                    await interaction.deferUpdate();
+                    await interaction.message.delete().catch(() => {});
+                } catch {}
 
-                await interaction.reply({
+                await interaction.followUp({
                     ephemeral: true,
-                    content: '都道府県を選んでください（任意）',
-                    components: prefPickComponents(mode, guildId, ownerId),
+                    content: '訪問日を入力しますか？（任意）',
+                    components: visitedDateAskComponents(guildId, ownerId, mode, postId || ''),
                 });
-
-                // reply の後、return の前で保存
-                prefPromptInteraction.set(k, interaction);
                 return;
             }
 
@@ -1710,10 +1836,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 } catch { }
 
-                // 都道府県ピッカーのephemeralメッセージを消す
-                const prevPref = prefPromptInteraction.get(k);
-                if (prevPref) { try { await prevPref.deleteReply(); } catch { } prefPromptInteraction.delete(k); }
-
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
                 } else {
@@ -1757,6 +1879,40 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.isModalSubmit()) {
             const id = interaction.customId;
 
+            if (id.startsWith('modalVisitedDate:')) {
+                const [, gid, ownerId, mode, postId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({ ephemeral: true, content: '途中状態がありません。最初からやり直して。' });
+                }
+
+                const raw = interaction.fields.getTextInputValue('visitedDate');
+                const normalized = normalizeVisitedDate(raw);
+
+                if (normalized === null) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: '訪問日は YYYY/MM/DD または YYYY-MM-DD 形式で入力してください。',
+                    });
+                }
+
+                d.visitedDate = normalized || '';
+                draftRating.set(k, d);
+
+                await interaction.reply({
+                    ephemeral: true,
+                    content: '都道府県を選んでください（任意）',
+                    components: prefPickComponents(mode, gid, ownerId),
+                });
+
+                const sent = await interaction.fetchReply();
+                prefPromptInteraction.set(k, sent);
+                return;
+            }
+
             // Create
             if (id.startsWith('modalCreate:')) {
                 const [, gid, ownerId] = id.split(':');
@@ -1771,16 +1927,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 const name = interaction.fields.getTextInputValue('name')?.trim();
                 const comment = interaction.fields.getTextInputValue('comment')?.trim();
                 const url = interaction.fields.getTextInputValue('url')?.trim();
-                const tags = [];
+                const mapUrl = interaction.fields.getTextInputValue('mapUrl')?.trim();
+                const tags = parseTags(interaction.fields.getTextInputValue('tags'));
                 const pref = (d?.prefecture ?? '').trim();
-
+                const visited = d.visited !== false;
+                const visitedDate = visited ? (d.visitedDate ?? '') : '';
+                
                 if (!name) {
                     return interaction.reply({ ephemeral: true, content: '店名は必須です。' });
                 }
-
-                const mapUrl = interaction.fields.getTextInputValue('mapUrl')?.trim();
-                const visitedDate = normalizeVisitedDate(interaction.fields.getTextInputValue('visitedDate'));
-                const visited = d.visited !== false;
 
                 const post = {
                     id: 'TEMP',
@@ -1790,7 +1945,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     comment,
                     url,
                     map_url: mapUrl,
-                    visited_date: visited ? visitedDate : '',
+                    visited_date: visitedDate,
                     tags,
                     prefecture: pref,
                     images: [],
@@ -1846,11 +2001,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 const name = interaction.fields.getTextInputValue('name')?.trim();
                 const comment = interaction.fields.getTextInputValue('comment')?.trim();
                 const url = interaction.fields.getTextInputValue('url')?.trim();
-                const tags = post.tags ?? [];
+                const tags = parseTags(interaction.fields.getTextInputValue('tags'));
                 const mapUrl = interaction.fields.getTextInputValue('mapUrl')?.trim();
-                const visitedDate = normalizeVisitedDate(interaction.fields.getTextInputValue('visitedDate'));
                 const visited = d.visited !== false;
                 const pref = (d?.prefecture ?? '').trim();
+                const visitedDate = visited ? (d.visitedDate ?? '') : '';
 
                 if (!name) {
                     return interaction.reply({ ephemeral: true, content: '店名は必須です。' });
@@ -1863,7 +2018,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 post.tags = tags;
                 post.visited = visited;
                 post.rating = visited ? d.rating : null;
-                post.visited_date = visited ? visitedDate : '';
+                post.visited_date = visitedDate;
                 post.prefecture = pref;
                 post.updated_at = nowIso();
 
