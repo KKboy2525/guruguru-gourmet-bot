@@ -96,6 +96,32 @@ const prefPromptInteraction = new Map();
 const photoView = new Map();
 
 // ====== util ======
+async function blankCurrentMessage(interaction) {
+    try {
+        if (!interaction?.message?.id) return;
+        await interaction.webhook.editMessage(interaction.message.id, {
+            content: ' ',
+            embeds: [],
+            components: [],
+        });
+    } catch (e) {
+        console.error('blankCurrentMessage failed:', e);
+    }
+}
+
+async function blankMessageById(interaction, messageId) {
+    try {
+        if (!messageId) return;
+        await interaction.webhook.editMessage(messageId, {
+            content: ' ',
+            embeds: [],
+            components: [],
+        });
+    } catch (e) {
+        console.error('blankMessageById failed:', e);
+    }
+}
+
 async function clearEphemeralMessage(interaction) {
     try {
         if (interaction?.message?.id) {
@@ -1160,12 +1186,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.prefecture = '';
                 draftRating.set(k, d);
 
-                await clearEphemeralMessage(interaction);
+                await blankCurrentMessage(interaction);
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
-                }
-                else {
+                } else {
                     const postId = d.postId;
                     await ensureCacheLoadedForGuild(interaction.guild);
                     const cache = getGuildCache(guildId);
@@ -1295,6 +1320,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     prefecture: prevDraft.prefecture ?? '',
                     visitedDate: prevDraft.visitedDate ?? '',
                     channelId: interaction.channelId,
+                    visitedDatePromptMessageId: interaction.message?.id ?? null,
                 });
 
                 await interaction.update({
@@ -1951,13 +1977,13 @@ client.on(Events.InteractionCreate, async interaction => {
 
             if (id.startsWith('create:prefPick:') || id.startsWith('edit:prefPick:')) {
                 const parts = id.split(':');
-                const mode = parts[0];     // create or edit
+                const mode = parts[0];
                 const gid = parts[2];
                 const ownerId = parts[3];
                 if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です。' });
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません。' });
 
-                const picked = interaction.values?.[0] ?? ''; // 未選択は ''
+                const picked = interaction.values?.[0] ?? '';
                 const d = draftRating.get(k);
                 if (!d || d.mode !== mode) {
                     return interaction.reply({ ephemeral: true, content: '途中状態がありません。最初からやり直して。' });
@@ -1966,12 +1992,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.prefecture = picked;
                 draftRating.set(k, d);
 
-                await clearEphemeralMessage(interaction);
+                await blankCurrentMessage(interaction);
 
                 if (mode === 'create') {
                     return interaction.showModal(buildCreateModal(gid, ownerId));
-                }
-                else {
+                } else {
                     const postId = d.postId;
                     await ensureCacheLoadedForGuild(interaction.guild);
                     const cache = getGuildCache(guildId);
@@ -2038,6 +2063,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 d.visitedDate = normalized || '';
                 draftRating.set(k, d);
+
+                // 「訪問日を入力しますか？」のメッセージを消す
+                await blankMessageById(interaction, d.visitedDatePromptMessageId);
 
                 await interaction.reply({
                     ephemeral: true,
@@ -2309,7 +2337,7 @@ console.log("LOGIN START");
 client.login(TOKEN).catch(e => {
     console.error('client.login failed:', e);
     process.exit(1);
-});
+}); ti
 
 const app = express();
 app.get("/", (req, res) => res.send("Bot is running"));
