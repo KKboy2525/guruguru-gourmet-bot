@@ -507,6 +507,33 @@ function buildCardEmbed(post) {
     return e;
 }
 
+function buildSearchCardEmbed(post) {
+    const lines = [visitLabel(post)];
+
+    if (hasRating(post)) {
+        lines.push(stars(post.rating));
+    }
+
+    lines.push(`🗾 ${post.prefecture ? post.prefecture : '(未設定)'}`);
+
+    if (post.visited !== false && post.visited_date) {
+        lines.push(`📅 ${post.visited_date}`);
+    }
+
+    lines.push(`🏷 ${tagString(post.tags)}`);
+    lines.push(`👤 登録者 <@${post.created_by}>`);
+
+    const e = new EmbedBuilder()
+        .setTitle(`🍽 ${post.name}`)
+        .setDescription(lines.join('\n'));
+
+    const urls = imageUrls(post);
+    const thumb = urls.length ? urls[urls.length - 1] : null;
+    if (thumb) e.setThumbnail(thumb);
+
+    return e;
+}
+
 function extractPostFromMessage(msg) {
     if (!msg?.embeds?.length) return null;
     const emb = msg.embeds[0];
@@ -1243,7 +1270,7 @@ async function renderSearchResultList(interaction, guildId, userId, { update = f
     const hasPrev = page > 0;
     const hasNext = start + pageSize < st.results.length;
 
-    const embeds = [header, ...slice.map(buildCardEmbed)];
+    const embeds = [header, ...slice.map(buildSearchCardEmbed)];
     const components = searchResultListComponents(guildId, userId, page, hasPrev, hasNext, options);
 
     const payload = { embeds, components };
@@ -1902,9 +1929,27 @@ client.on(Events.InteractionCreate, async interaction => {
                 );
 
             const nav = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`search:prefPagePrev:${guildId}:${ownerId}:${p}`).setLabel('◀ 前へ').setStyle(ButtonStyle.Secondary).setDisabled(p <= 0),
-                new ButtonBuilder().setCustomId(`search:prefPageNext:${guildId}:${ownerId}:${p}`).setLabel('次へ ▶').setStyle(ButtonStyle.Secondary).setDisabled(p >= totalPages - 1),
-                new ButtonBuilder().setCustomId(`search:prefPageClear:${guildId}:${ownerId}`).setLabel('解除').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPagePrev:${guildId}:${ownerId}:${p}`)
+                    .setLabel('◀ 前へ')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(p <= 0),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPageNext:${guildId}:${ownerId}:${p}`)
+                    .setLabel('次へ ▶')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(p >= totalPages - 1),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPageClear:${guildId}:${ownerId}`)
+                    .setLabel('解除')
+                    .setStyle(ButtonStyle.Secondary),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefBack:${guildId}:${ownerId}`)
+                    .setLabel('戻る')
+                    .setStyle(ButtonStyle.Secondary),
             );
 
             return interaction.update({
@@ -2303,6 +2348,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 new ButtonBuilder()
                     .setCustomId(`search:prefPageClear:${guildId}:${ownerId}`)
                     .setLabel('解除')
+                    .setStyle(ButtonStyle.Secondary),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefBack:${guildId}:${ownerId}`)
+                    .setLabel('戻る')
                     .setStyle(ButtonStyle.Secondary),
             );
 
