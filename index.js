@@ -85,7 +85,7 @@ const searchState = new Map();
 const mineState = new Map();
 
 // 写真追加待ち key: guildId:userId
-// { postId, channelId, guildId, expiresAt, uiMessageRef?, backTo?: 'home'|'detail' }
+// { postId, channelId, guildId, uiMessageRef?, backTo?: 'home'|'detail' }
 const awaitingPhoto = new Map();
 
 // ephemeralプロンプトを消すための参照
@@ -587,7 +587,7 @@ function photoWaitingEmbed(name) {
         .setTitle('📷 写真追加')
         .setDescription(
             `**${name}** を登録しました\n` +
-            'このチャンネルに写真を送信してください（5分以内）\n' +
+            'このチャンネルに写真を送信してください\n' +
             '送信した画像をすべて追加します。投稿後、Botが元メッセージを削除します'
         );
 }
@@ -597,7 +597,7 @@ function photoAddWaitingEmbed(name) {
         .setTitle('📷 写真追加')
         .setDescription(
             `**${name}** に写真を追加します\n` +
-            'このチャンネルに写真を送信してください（5分以内）\n' +
+            'このチャンネルに写真を送信してください\n' +
             '送信した画像をすべて追加します。投稿後、Botが元メッセージを削除します'
         );
 }
@@ -609,9 +609,13 @@ function photoWaitingComponents(guildId, userId) {
                 .setCustomId('photo:waiting')
                 .setLabel('写真を送信待ち')
                 .setStyle(ButtonStyle.Secondary)
-                .setDisabled(true)
-        ),
-        ...cancelRow(guildId, userId),
+                .setDisabled(true),
+
+            new ButtonBuilder()
+                .setCustomId(`photo:skip:${guildId}:${userId}`)
+                .setLabel('送信しない')
+                .setStyle(ButtonStyle.Secondary)
+        )
     ];
 }
 
@@ -629,7 +633,6 @@ function photoWaitingComponentsForCreate(guildId, userId) {
                 .setLabel('送信しない')
                 .setStyle(ButtonStyle.Secondary)
         ),
-        ...cancelRow(guildId, userId),
     ];
 }
 
@@ -1258,21 +1261,71 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
                 }
 
+                const wait = awaitingPhoto.get(k);
                 awaitingPhoto.delete(k);
 
-                try {
-                    await interaction.webhook.deleteMessage(interaction.message.id);
-                } catch {
-                    try {
-                        await interaction.update({
-                            content: ' ',
-                            embeds: [],
-                            components: [],
+                // 詳細画面から写真追加に来た場合は、詳細へ戻す
+                if (wait?.backTo === 'detail' && wait.postId) {
+                    await ensureCacheLoadedForGuild(interaction.guild);
+                    const cache = getGuildCache(guildId);
+                    const post = cache.get(wait.postId);
+
+                    if (post) {
+                        const fromMine = cameFromMine(k, wait.postId, mineState);
+
+                        const { detail, components } = renderDetail(interaction, {
+                            post,
+                            guildId,
+                            userId,
+                            fromMine,
+                            total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
                         });
-                    } catch { }
+
+                        return interaction.update({
+                            content: '',
+                            embeds: [detail],
+                            components,
+                        });
+                    }
                 }
 
-                return;
+                // 新規登録後なら「詳細を開くか確認」
+                if (wait?.backTo === 'home' && wait.postId) {
+                    await ensureCacheLoadedForGuild(interaction.guild);
+                    const cache = getGuildCache(guildId);
+                    const post = cache.get(wait.postId);
+
+                    if (!post) {
+                        return interaction.update({
+                            content: '',
+                            embeds: [homeEmbed()],
+                            components: homeComponents(),
+                        });
+                    }
+
+                    return interaction.update({
+                        content: '',
+                        embeds: [
+                            confirmEmbed(
+                                '📄 詳細を開きますか？',
+                                `**${post.name}**`
+                            )
+                        ],
+                        components: confirmComponents(
+                            'openDetailAfterCreate',
+                            guildId,
+                            userId,
+                            post.id
+                        ),
+                    });
+                }
+
+                // 念のためフォールバック
+                return interaction.update({
+                    content: '',
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
+                });
             }
 
             // 記録フロー中断
@@ -1340,6 +1393,37 @@ client.on(Events.InteractionCreate, async interaction => {
                 await ensureCacheLoadedForGuild(interaction.guild);
                 const cache = getGuildCache(guildId);
                 const post = cache.get(postId);
+
+                if (kind === 'openDetailAfterCreate') {
+                    if (!post) {
+                        return interaction.update({
+                            embeds: [homeEmbed()],
+                            components: homeComponents(),
+                        });
+                    }
+
+                    if (answer === 'yes') {
+                        const { detail, components } = renderDetail(interaction, {
+                            post,
+                            guildId,
+                            userId,
+                            fromMine: false,
+                            total: 1,
+                        });
+
+                        return interaction.update({
+                            content: '',
+                            embeds: [detail],
+                            components,
+                        });
+                    }
+
+                    return interaction.update({
+                        content: '',
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+                }
 
                 if (answer === 'no') {
                     try {
@@ -2296,7 +2380,6 @@ client.on(Events.InteractionCreate, async interaction => {
                         postId,
                         channelId: interaction.channelId,
                         guildId,
-                        expiresAt: Date.now() + 300_000,
                         backTo: 'detail',
                         uiMessageRef: {
                             webhook: interaction.webhook,
@@ -2740,22 +2823,22 @@ client.on(Events.InteractionCreate, async interaction => {
                 await sent.edit({ embeds: [buildPostEmbedForDb(post)] });
                 cache.set(post.id, post);
 
-                const waitPayload = {
-                    content: '',
-                    embeds: [photoWaitingEmbed(post.name)],
-                    components: photoWaitingComponentsForCreate(guildId, userId),
+                const homePayload = {
+                    content: `✅ **${post.name}** を登録しました\nこのあと画像を送ると、この記録に写真が追加されます`,
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
                 };
 
                 draftRating.delete(k);
                 visitedDatePromptRef.delete(k);
                 prefPromptRef.delete(k);
 
-                const updated = await editPromptRef(prefRef, waitPayload);
+                const updated = await editPromptRef(prefRef, homePayload);
 
                 let uiRef = prefRef ?? null;
 
                 if (!updated) {
-                    await interaction.editReply(waitPayload);
+                    await interaction.editReply(homePayload);
                     const replyMsg = await interaction.fetchReply().catch(() => null);
 
                     if (replyMsg?.id) {
@@ -2775,7 +2858,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     postId: post.id,
                     channelId: interaction.channelId,
                     guildId,
-                    expiresAt: Date.now() + 300_000,
                     backTo: 'home',
                     uiMessageRef: uiRef,
                 });
@@ -2883,17 +2965,31 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
                 await rememberUiReply(interaction, guildId, userId);
                 return;
-            }
-        }
+            } // modalSearch 終了
+        } // interaction.isModalSubmit() 終了
     } catch (e) {
         console.error(e);
         if (interaction.isRepliable()) {
             try {
-                await interaction.reply({ ephemeral: true, content: `エラー: ${e.message}` });
                 const gid = interaction.guildId;
                 const uid = interaction.user?.id;
-                if (gid && uid) {
-                    await rememberUiReply(interaction, gid, uid);
+
+                let errMsg;
+                if (interaction.deferred || interaction.replied) {
+                    errMsg = await interaction.followUp({
+                        ephemeral: true,
+                        content: `エラー: ${e.message}`
+                    });
+                } else {
+                    errMsg = await interaction.reply({
+                        ephemeral: true,
+                        content: `エラー: ${e.message}`,
+                        fetchReply: true
+                    });
+                }
+
+                if (gid && uid && errMsg?.id) {
+                    addUiMessageId(gid, uid, errMsg.id);
                 }
             } catch { }
         }
@@ -2912,14 +3008,6 @@ client.on(Events.MessageCreate, async msg => {
 
         if (wait.guildId !== msg.guildId) return;
         if (wait.channelId !== msg.channelId) return;
-
-        if (Date.now() > wait.expiresAt) {
-            if (wait.interaction) {
-                try { await wait.interaction.deleteReply(); } catch { }
-            }
-            awaitingPhoto.delete(k);
-            return;
-        }
 
         // 複数画像を全部拾う
         const imgs = [...(msg.attachments?.values() ?? [])].filter(a => isImageAttachment(a));
@@ -2968,10 +3056,21 @@ client.on(Events.MessageCreate, async msg => {
         // 写真追加後は詳細画面に戻す
         if (wait.uiMessageRef) {
             if (wait.backTo === 'home') {
+
                 await editPromptRef(wait.uiMessageRef, {
-                    content: `✅ 写真を追加しました: ${post.name}`,
-                    embeds: [homeEmbed()],
-                    components: homeComponents(),
+                    content: '',
+                    embeds: [
+                        confirmEmbed(
+                            '📄 詳細を開きますか？',
+                            `**${post.name}**`
+                        )
+                    ],
+                    components: confirmComponents(
+                        'openDetailAfterCreate',
+                        msg.guildId,
+                        msg.author.id,
+                        post.id
+                    ),
                 });
             } else {
                 const detail = buildPostEmbedForView(post);
