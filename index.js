@@ -105,6 +105,23 @@ const detailNavState = new Map();
 const searchKeywordPromptRef = new Map();
 
 // ====== util ======
+function nowIso() {
+    return new Date().toISOString();
+}
+
+function formatJst(date) {
+    if (!date) return '';
+    return new Date(date).toLocaleString('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    });
+}
+
 function setDetailNavState(guildId, userId, postId, { fromMine = false, forceHomeBack = false } = {}) {
     const k = keyOf(guildId, userId);
     detailNavState.set(k, {
@@ -258,7 +275,7 @@ function buildDetailEmbedsChunks(post, { sharedByUserId = null } = {}) {
         );
 
     if (post.updated_at) {
-        info.setFooter({ text: `更新: ${new Date(post.updated_at).toLocaleString()}` });
+        info.setFooter({ text: `更新: ${formatJst(post.updated_at)}` });
     }
 
     const images = imageUrls(post);
@@ -279,10 +296,6 @@ function buildDetailEmbedsChunks(post, { sharedByUserId = null } = {}) {
     }
 
     return chunks;
-}
-
-function nowIso() {
-    return new Date().toISOString();
 }
 
 function keyOf(guildId, userId) {
@@ -425,7 +438,7 @@ function buildPostEmbedForView(post, { sharedByUserId = null } = {}) {
         .addFields(fields);
 
     if (post.updated_at) {
-        e.setFooter({ text: `更新: ${new Date(post.updated_at).toLocaleString()}` });
+        e.setFooter({ text: `更新: ${formatJst(post.updated_at)}` });
     }
 
     const urls = imageUrls(post);
@@ -458,7 +471,7 @@ function buildPostEmbed(post, { sharedByUserId = null } = {}) {
             `\n${DATA_MARK}${JSON.stringify(post)}`
         )
         .addFields({ name: '🔗 Webサイト', value: post.url || '(なし)' })
-        .setFooter({ text: `ID: ${post.id}  更新: ${new Date(post.updated_at).toLocaleString()}` });
+        .setFooter({ text: `ID: ${post.id}  更新: ${formatJst(post.updated_at)}` });
 
     // 詳細は最後の画像をメインに
     const urls = imageUrls(post);
