@@ -81,7 +81,7 @@ const uiMessages = new Map();
 const searchState = new Map();
 
 // 自分の記録（カード一覧）状態 key: guildId:userId
-// { results?:string[], page?:number, visitedFilterVisited?:boolean, visitedFilterUnvisited?:boolean }
+// { results?:string[], page?:number, visitFilter?:'all'|'visited'|'planned' }
 const mineState = new Map();
 
 // 写真追加待ち key: guildId:userId
@@ -304,16 +304,11 @@ function hasRating(post) {
 }
 
 function visitFilterMatch(state, post) {
-    const v = !!state?.visitedFilterVisited;
-    const nv = !!state?.visitedFilterUnvisited;
+    const filter = state?.visitFilter ?? 'all';
 
-    // 両方ON / 両方OFF は全件
-    if ((v && nv) || (!v && !nv)) return true;
-
-    if (v) return post.visited !== false;
-    if (nv) return post.visited === false;
-
-    return true;
+    if (filter === 'visited') return post.visited !== false;
+    if (filter === 'planned') return post.visited === false;
+    return true; // all
 }
 
 function normalizeVisitedDate(raw) {
@@ -992,10 +987,24 @@ function confirmEmbed(title, message) {
 }
 
 function mineListComponents(guildId, userId, page, hasPrev, hasNext, options, st) {
+    const filter = st?.visitFilter ?? 'all';
+
     return [
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`mine:toggleVisited:${guildId}:${userId}`).setLabel(`${st?.visitedFilterVisited ? '☑' : '☐'} 行った`).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`mine:toggleUnvisited:${guildId}:${userId}`).setLabel(`${st?.visitedFilterUnvisited ? '☑' : '☐'} 行きたい`).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`mine:filter:all:${guildId}:${userId}`)
+                .setLabel(`${filter === 'all' ? '◉' : '○'} すべて`)
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`mine:filter:visited:${guildId}:${userId}`)
+                .setLabel(`${filter === 'visited' ? '◉' : '○'} 行った`)
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`mine:filter:planned:${guildId}:${userId}`)
+                .setLabel(`${filter === 'planned' ? '◉' : '○'} 行きたい`)
+                .setStyle(ButtonStyle.Secondary),
         ),
         new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
@@ -1916,8 +1925,7 @@ client.on(Events.InteractionCreate, async interaction => {
             mineState.set(k, {
                 results: mine.map(p => p.id),
                 page: 0,
-                visitedFilterVisited: true,
-                visitedFilterUnvisited: true,
+                visitFilter: 'all',
             });
 
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
@@ -2565,30 +2573,25 @@ client.on(Events.InteractionCreate, async interaction => {
             });
         }
 
-        if (id.startsWith('mine:toggleVisited:')) {
-            const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+        if (id.startsWith('mine:filter:')) {
+            const [, , filter, gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
 
             const st = mineState.get(k);
-            if (!st) return interaction.reply({ ephemeral: true, content: '一覧がありません' });
+            if (!st) {
+                return interaction.reply({ ephemeral: true, content: '一覧がありません' });
+            }
 
-            st.visitedFilterVisited = !st.visitedFilterVisited;
-            st.page = 0;
-            mineState.set(k, st);
+            if (!['all', 'visited', 'planned'].includes(filter)) {
+                return interaction.reply({ ephemeral: true, content: 'フィルタが不正です' });
+            }
 
-            return renderMineList(interaction, guildId, userId, { update: true });
-        }
-
-        if (id.startsWith('mine:toggleUnvisited:')) {
-            const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const st = mineState.get(k);
-            if (!st) return interaction.reply({ ephemeral: true, content: '一覧がありません' });
-
-            st.visitedFilterUnvisited = !st.visitedFilterUnvisited;
+            st.visitFilter = filter;
             st.page = 0;
             mineState.set(k, st);
 
@@ -2604,8 +2607,17 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = mineState.get(k);
             if (!st?.results?.length) return interaction.reply({ ephemeral: true, content: '一覧がありません' });
 
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+
+            const filteredIds = st.results.filter(pid => {
+                const p = cache.get(pid);
+                if (!p) return false;
+                return visitFilterMatch(st, p);
+            });
+
             const pageSize = 5;
-            const maxPage = Math.max(0, Math.ceil(st.results.length / pageSize) - 1);
+            const maxPage = Math.max(0, Math.ceil(filteredIds.length / pageSize) - 1);
 
             st.page = Number(st.page) || 0;
             st.page += dir === 'prev' ? -1 : +1;
