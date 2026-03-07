@@ -1041,6 +1041,61 @@ function confirmEmbed(title, message) {
         .setDescription(message);
 }
 
+function confirmPhotoDeleteEmbed(post, idx) {
+    const urls = imageUrls(post);
+    const safeIdx = Math.max(0, Math.min(urls.length - 1, Number(idx) || 0));
+
+    const e = new EmbedBuilder()
+        .setTitle('⚠ 写真を削除')
+        .setDescription(
+            `**${post.name}** のこの写真を削除しますか？\n` +
+            (urls.length ? `写真 ${safeIdx + 1}/${urls.length}` : '')
+        );
+
+    if (urls.length) {
+        e.setImage(urls[safeIdx]);
+    }
+
+    return e;
+}
+
+function confirmDeletePostEmbed(post, { imageIndex = null } = {}) {
+    const urls = imageUrls(post);
+    const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
+
+    const e = buildPostEmbedForView(post, { imageIndex: idx });
+
+    e.setTitle(`⚠ 店情報を削除: ${post.name}`);
+
+    e.spliceFields(0, 0, {
+        name: '確認',
+        value: 'この記録と写真をすべて削除します。本当に削除しますか？',
+    });
+
+    if (urls.length) {
+        e.addFields({
+            name: '📷 写真',
+            value: `${urls.length}枚登録されています`,
+        });
+    }
+
+    return e;
+}
+
+function confirmDeleteAllPhotosEmbed(post) {
+    const urls = imageUrls(post);
+
+    const e = new EmbedBuilder()
+        .setTitle('⚠ 写真をすべて削除')
+        .setDescription(`**${post.name}** の写真をすべて削除しますか？`);
+
+    if (urls.length) {
+        e.setImage(urls[Math.max(0, urls.length - 1)]);
+    }
+
+    return e;
+}
+
 function mineListComponents(guildId, userId, page, hasPrev, hasNext, options, st) {
     const filter = st?.visitFilter ?? 'all';
 
@@ -1670,18 +1725,95 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (answer === 'no') {
-                try {
-                    await interaction.webhook.deleteMessage(interaction.message.id);
-                } catch {
-                    try {
-                        await interaction.update({
-                            content: ' ',
-                            embeds: [],
-                            components: [],
+                // 写真1枚削除キャンセル → 写真管理へ戻す
+                if (kind === 'deletePhoto') {
+                    if (!post) {
+                        return interaction.update({
+                            content: '',
+                            embeds: [homeEmbed()],
+                            components: homeComponents(),
                         });
-                    } catch { }
+                    }
+
+                    const urls = imageUrls(post);
+                    const idx = Math.max(0, Math.min(urls.length - 1, Number(extra) || 0));
+
+                    photoView.set(k, { postId, idx });
+
+                    const embed = new EmbedBuilder()
+                        .setTitle(`🖼 写真管理: ${post.name}`)
+                        .setDescription(urls.length ? `写真 ${idx + 1}/${urls.length}` : '写真はありません')
+                        .setImage(urls.length ? urls[idx] : null);
+
+                    return interaction.update({
+                        content: '',
+                        embeds: [embed],
+                        components: photoManagerComponents(guildId, ownerId, postId, urls.length > 0),
+                    });
                 }
-                return;
+
+                // 全写真削除キャンセル → 写真管理へ戻す
+                if (kind === 'deleteAllPhotos') {
+                    if (!post) {
+                        return interaction.update({
+                            content: '',
+                            embeds: [homeEmbed()],
+                            components: homeComponents(),
+                        });
+                    }
+
+                    const urls = imageUrls(post);
+                    const pv = photoView.get(k) ?? { postId, idx: Math.max(0, urls.length - 1) };
+                    if (pv.idx >= urls.length) pv.idx = Math.max(0, urls.length - 1);
+                    photoView.set(k, pv);
+
+                    const embed = new EmbedBuilder()
+                        .setTitle(`🖼 写真管理: ${post.name}`)
+                        .setDescription(urls.length ? `写真 ${pv.idx + 1}/${urls.length}` : '写真はありません')
+                        .setImage(urls.length ? urls[pv.idx] : null);
+
+                    return interaction.update({
+                        content: '',
+                        embeds: [embed],
+                        components: photoManagerComponents(guildId, ownerId, postId, urls.length > 0),
+                    });
+                }
+
+                if (kind === 'deletePost') {
+                    if (!post) {
+                        return interaction.update({
+                            content: '',
+                            embeds: [homeEmbed()],
+                            components: homeComponents(),
+                        });
+                    }
+
+                    const nav = getDetailNavState(guildId, userId, postId);
+                    const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+                    const forceHomeBack = nav?.forceHomeBack ?? false;
+
+                    const { detail, components } = renderDetail(interaction, {
+                        post,
+                        guildId,
+                        userId,
+                        fromMine,
+                        total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                        forceHomeBack,
+                    });
+
+                    return interaction.update({
+                        content: '',
+                        embeds: [detail],
+                        components,
+                    });
+                }
+
+                // 店削除や作成後確認など、他の confirm は閉じるだけ
+                return interaction.update({
+                    content: ' ',
+                    embeds: [],
+                    components: [],
+                });
             }
 
             // ===== YES =====
@@ -2717,18 +2849,20 @@ client.on(Events.InteractionCreate, async interaction => {
             const cache = getGuildCache(guildId);
             const post = cache.get(postId);
             if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-            if (interaction.user.id !== post.created_by) {
-                return interaction.reply({ ephemeral: true, content: '削除できるのは登録者のみです' });
+            if (!canEdit(interaction, post)) {
+                return interaction.reply({ ephemeral: true, content: '削除できるのは登録者または管理者のみです' });
             }
 
-            return interaction.reply({
-                ephemeral: true,
-                embeds: [
-                    confirmEmbed(
-                        '⚠ 店情報を削除',
-                        `**${post.name}** の記録と写真をすべて削除します。\n本当に削除しますか？`
-                    )
-                ],
+            const urls = imageUrls(post);
+            const k = keyOf(guildId, userId);
+            const pv = detailPhotoView.get(k);
+            const idx = pv?.postId === postId
+                ? Math.max(0, Math.min(urls.length - 1, Number(pv.idx) || 0))
+                : Math.max(0, urls.length - 1);
+
+            return interaction.update({
+                content: '',
+                embeds: [confirmDeletePostEmbed(post, { imageIndex: idx })],
                 components: confirmComponents('deletePost', guildId, userId, postId),
             });
         }
@@ -2823,17 +2957,16 @@ client.on(Events.InteractionCreate, async interaction => {
 
             if (action === 'del') {
                 const urls = imageUrls(post);
-                if (!urls.length) return interaction.reply({ ephemeral: true, content: '写真がありません' });
+                if (!urls.length) {
+                    return interaction.reply({ ephemeral: true, content: '写真がありません' });
+                }
 
-                return interaction.reply({
-                    ephemeral: true,
-                    embeds: [
-                        confirmEmbed(
-                            '⚠ 写真を削除',
-                            '表示中のこの写真を削除しますか？'
-                        )
-                    ],
-                    components: confirmComponents('deletePhoto', guildId, ownerId, postId, String(pv.idx)),
+                const idx = Math.max(0, Math.min(urls.length - 1, Number(pv.idx) || 0));
+
+                return interaction.update({
+                    content: '',
+                    embeds: [confirmPhotoDeleteEmbed(post, idx)],
+                    components: confirmComponents('deletePhoto', guildId, ownerId, postId, String(idx)),
                 });
             }
 
@@ -2843,14 +2976,9 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '写真がありません' });
                 }
 
-                return interaction.reply({
-                    ephemeral: true,
-                    embeds: [
-                        confirmEmbed(
-                            '⚠ 写真をすべて削除',
-                            `**${post.name}** の写真をすべて削除しますか？`
-                        )
-                    ],
+                return interaction.update({
+                    content: '',
+                    embeds: [confirmDeleteAllPhotosEmbed(post)],
                     components: confirmComponents('deleteAllPhotos', guildId, ownerId, postId),
                 });
             }
@@ -3579,8 +3707,14 @@ client.on(Events.MessageCreate, async msg => {
                 const fromMine = nav?.fromMine ?? cameFromMine(k, post.id, mineState);
                 const forceHomeBack = nav?.forceHomeBack ?? false;
 
+                const member = msg.member ?? await msg.guild.members.fetch(msg.author.id).catch(() => null);
+
                 const { detail, components } = renderDetail(
-                    { guild: msg.guild, user: msg.author, memberPermissions: null },
+                    {
+                        guild: msg.guild,
+                        user: msg.author,
+                        memberPermissions: member?.permissions ?? null,
+                    },
                     {
                         post,
                         guildId: msg.guildId,
