@@ -2824,9 +2824,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 cache.set(post.id, post);
 
                 const homePayload = {
-                    content: `✅ **${post.name}** を登録しました\nこのあと画像を送ると、この記録に写真が追加されます`,
-                    embeds: [homeEmbed()],
-                    components: homeComponents(),
+                    content: `✅ **${post.name}** を登録しました\n写真を送るとこの記録に追加されます`,
+                    embeds: [],
+                    components: photoWaitingComponentsForCreate(guildId, userId),
                 };
 
                 draftRating.delete(k);
@@ -3058,7 +3058,7 @@ client.on(Events.MessageCreate, async msg => {
             if (wait.backTo === 'home') {
 
                 await editPromptRef(wait.uiMessageRef, {
-                    content: '',
+                    content: `✅ **${post.name}** に写真を追加しました`,
                     embeds: [
                         confirmEmbed(
                             '📄 詳細を開きますか？',
@@ -3079,13 +3079,18 @@ client.on(Events.MessageCreate, async msg => {
                 const fromMine = cameFromMine(k, post.id, mineState);
 
                 await editPromptRef(wait.uiMessageRef, {
-                    content: '',
+                    content: `✅ **${post.name}** に写真を追加しました`,
                     embeds: [detail],
-                    components: detailActionComponents(msg.guildId, msg.author.id, post.id, {
-                        fromMine,
-                        canEditThis: true,
-                        total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
-                    }),
+                    components: detailActionComponents(
+                        msg.guildId,
+                        msg.author.id,
+                        post.id,
+                        {
+                            fromMine,
+                            canEditThis: true,
+                            total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
+                        }
+                    ),
                 });
             }
         } else if (wait.interaction) {
