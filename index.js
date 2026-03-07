@@ -360,6 +360,14 @@ function normalizeVisitedDate(raw) {
     return `${y}/${mm}/${dd}`;
 }
 
+function todayYMD() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}/${m}/${day}`;
+}
+
 function parseTags(raw) {
     const arr = (raw ?? '')
         .split(',')
@@ -675,7 +683,7 @@ function buildCreatePanelEmbed(d = {}) {
         .setDescription(
             `🍽 お店の名前: ${d.name?.trim() ? d.name : '(未入力)'}\n` +
             `✅ 訪問状態: ${d.visited == null ? '未選択' : (d.visited ? '行った' : '行きたい')}\n` +
-            `⭐ 評価: ${d.visited === false ? '不要' : (d.rating ? stars(d.rating) : '未選択')}\n` +
+            `⭐ 評価: ${d.visited === false ? '不要' : (d.rating ? stars(d.rating) : '未選択（必須）')}\n` +
             `💬 コメント: ${d.comment?.trim() ? d.comment : '(なし)'}\n` +
             `🗾 都道府県: ${d.prefecture || '(未設定)'}\n` +
             `📅 行った日付: ${d.visited === false ? '不要' : (d.visitedDate || '(未入力)')}\n` +
@@ -693,7 +701,7 @@ function buildEditPanelEmbed(d = {}) {
         .setDescription(
             `🍽 お店の名前: ${d.name?.trim() ? d.name : '(未入力)'}\n` +
             `✅ 訪問状態: ${d.visited == null ? '未選択' : (d.visited ? '行った' : '行きたい')}\n` +
-            `⭐ 評価: ${d.visited === false ? '不要' : (d.rating ? stars(d.rating) : '未選択')}\n` +
+            `⭐ 評価: ${d.visited === false ? '不要' : (d.rating ? stars(d.rating) : '未選択（必須）')}\n` +
             `💬 コメント: ${d.comment?.trim() ? d.comment : '(なし)'}\n` +
             `🗾 都道府県: ${d.prefecture || '(未設定)'}\n` +
             `📅 行った日付: ${d.visited === false ? '不要' : (d.visitedDate || '(未入力)')}\n` +
@@ -825,17 +833,17 @@ function editPanelComponents(guildId, userId, d = {}) {
             .setCustomId(`edit:setPref:${guildId}:${userId}`)
             .setLabel('都道府県')
             .setStyle(ButtonStyle.Secondary),
-
-        new ButtonBuilder()
-            .setCustomId(`edit:setComment:${guildId}:${userId}`)
-            .setLabel('コメント')
-            .setStyle(ButtonStyle.Secondary),
     );
 
     return [
         new ActionRowBuilder().addComponents(...row1),
 
         new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`edit:setComment:${guildId}:${userId}`)
+                .setLabel('コメント')
+                .setStyle(ButtonStyle.Secondary),
+
             new ButtonBuilder()
                 .setCustomId(`edit:setTags:${guildId}:${userId}`)
                 .setLabel('タグ')
@@ -1112,7 +1120,7 @@ function buildVisitedDateModal(gid, ownerId, mode, postId = '', currentValue = '
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
 
-    const todayStr = `${yyyy}-${mm}-${dd}`;
+    const todayStr = todayYMD();
 
     return new ModalBuilder()
         .setCustomId(`modalVisitedDate:${gid}:${ownerId}:${mode}:${postId}`)
@@ -1124,7 +1132,7 @@ function buildVisitedDateModal(gid, ownerId, mode, postId = '', currentValue = '
                     .setLabel('行った日付')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(false)
-                    .setPlaceholder('YYYY-MM-DD')
+                    .setPlaceholder(`${todayStr} または ${todayStr.replace(/\//g, '-')}`)
                     .setValue(currentValue || todayStr)
             )
         );
@@ -1139,7 +1147,9 @@ function buildCommentModal(gid, ownerId, currentValue = '') {
                 new TextInputBuilder()
                     .setCustomId('comment')
                     .setLabel('コメント')
+                    .setPlaceholder('500文字以内で入力してください')
                     .setStyle(TextInputStyle.Paragraph)
+                    .setMaxLength(500)
                     .setRequired(false)
                     .setValue(currentValue ?? '')
             )
@@ -1236,7 +1246,9 @@ function buildEditCommentModal(gid, ownerId, currentValue = '') {
                 new TextInputBuilder()
                     .setCustomId('comment')
                     .setLabel('コメント')
+                    .setPlaceholder('500文字以内で入力してください')
                     .setStyle(TextInputStyle.Paragraph)
+                    .setMaxLength(500)
                     .setRequired(false)
                     .setValue(currentValue ?? '')
             )
@@ -1463,19 +1475,18 @@ function searchPanelComponents(guildId, userId, st = {}) {
 }
 
 function photoManagerComponents(guildId, userId, postId, total = 0) {
-    const canMove = total > 1;
     const hasAny = total > 0;
 
     return [
         new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId(`ph:prev:${guildId}:${ownerId}:${postId}`)
+                .setCustomId(`ph:prev:${guildId}:${userId}:${postId}`)
                 .setLabel('◀')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(total <= 1),
 
             new ButtonBuilder()
-                .setCustomId(`ph:next:${guildId}:${ownerId}:${postId}`)
+                .setCustomId(`ph:next:${guildId}:${userId}:${postId}`)
                 .setLabel('▶')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(total <= 1),
@@ -2197,65 +2208,6 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         }
 
-        // 記録フロー中断
-        if (id.startsWith('cancel:flow:')) {
-            const [, , gid, ownerId] = id.split(':');
-
-            if (interaction.guildId !== gid) {
-                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            }
-            if (userId !== ownerId) {
-                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-            }
-
-            const draft = draftRating.get(k);
-
-            draftRating.delete(k);
-
-            // 編集フロー中断 → 元の詳細へ戻す
-            if (draft?.mode === 'edit' && draft?.postId) {
-                await ensureCacheLoadedForGuild(interaction.guild);
-                const cache = getGuildCache(guildId);
-                const post = cache.get(draft.postId);
-
-                if (post) {
-                    const nav = getDetailNavState(guildId, userId, draft.postId);
-                    const fromMine = nav?.fromMine ?? cameFromMine(k, draft.postId, mineState);
-                    const forceHomeBack = nav?.forceHomeBack ?? false;
-
-                    const { detail, components } = renderDetail(interaction, {
-                        post,
-                        guildId,
-                        userId,
-                        fromMine,
-                        total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-                        forceHomeBack,
-                    });
-
-                    await interaction.update({
-                        content: '',
-                        embeds: [detail],
-                        components,
-                    });
-
-                    uiMessages.set(k, new Set([interaction.message.id]));
-                    await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-                    return;
-                }
-            }
-
-            // 新規作成フロー中断 → ホーム
-            await interaction.update({
-                content: '',
-                embeds: [homeEmbed()],
-                components: homeComponents(),
-            });
-
-            uiMessages.set(k, new Set([interaction.message.id]));
-            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-            return;
-        }
-
         if (id.startsWith('confirm:')) {
             const [, answer, kind, gid, ownerId, postId, extra] = id.split(':');
 
@@ -2920,6 +2872,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
+            // 「行った」のときは評価必須
+            if (d.visited === true && (d.rating == null || ![1, 2, 3, 4, 5].includes(Number(d.rating)))) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: '「行った」を選んだ場合は評価を選択してください'
+                });
+            }
+
             await interaction.deferUpdate();
 
             const post = {
@@ -3225,6 +3185,13 @@ client.on(Events.InteractionCreate, async interaction => {
 
             if (!d.name?.trim()) {
                 return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
+            }
+
+            if (d.visited === true && (d.rating == null || ![1, 2, 3, 4, 5].includes(Number(d.rating)))) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: '「行った」を選んだ場合は評価を選択してください'
+                });
             }
 
             await ensureCacheLoadedForGuild(interaction.guild);
@@ -4317,7 +4284,16 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
                 }
 
-                d.comment = interaction.fields.getTextInputValue('comment')?.trim() ?? '';
+                const comment = interaction.fields.getTextInputValue('comment')?.trim() ?? '';
+
+                if (comment.length > 500) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: `コメントは500文字以内で入力してください（現在 ${comment.length}文字）`
+                    });
+                }
+
+                d.comment = comment;
                 draftRating.set(k, d);
 
                 await interaction.deferReply({ ephemeral: true });
@@ -4560,7 +4536,16 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
                 }
 
-                d.comment = interaction.fields.getTextInputValue('comment')?.trim() ?? '';
+                const comment = interaction.fields.getTextInputValue('comment')?.trim() ?? '';
+
+                if (comment.length > 500) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: `コメントは500文字以内で入力してください（現在 ${comment.length}文字）`
+                    });
+                }
+
+                d.comment = comment;
                 draftRating.set(k, d);
 
                 await interaction.deferReply({ ephemeral: true });
