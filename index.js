@@ -1095,25 +1095,38 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     await rememberUiReply(interaction, guildId, userId);
 }
 
-function detailActionComponents(guildId, userId, postId, { fromMine = false, canEditThis = true, total = 1 } = {}) {
+function detailActionComponents(
+    guildId,
+    userId,
+    postId,
+    { fromMine = false, canEditThis = true, total = 1, forceHomeBack = false } = {}
+) {
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`res:prev:${guildId}:${userId}`)
             .setLabel('◀')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(fromMine || total <= 1),
+            .setDisabled(fromMine || forceHomeBack || total <= 1),
 
         new ButtonBuilder()
             .setCustomId(`res:next:${guildId}:${userId}`)
             .setLabel('▶')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(fromMine || total <= 1),
+            .setDisabled(fromMine || forceHomeBack || total <= 1),
 
         new ButtonBuilder()
             .setCustomId(`res:share:${guildId}:${userId}:${postId}`)
             .setLabel('📤 このチャンネルに送信')
             .setStyle(ButtonStyle.Primary)
     );
+
+    const backCustomId = forceHomeBack
+        ? `mine:home:${guildId}:${userId}`
+        : (fromMine ? `mine:back:${guildId}:${userId}` : `res:back:${guildId}:${userId}`);
+
+    const backLabel = forceHomeBack
+        ? '🏠 ホーム'
+        : '🔙 戻る';
 
     const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -1135,8 +1148,8 @@ function detailActionComponents(guildId, userId, postId, { fromMine = false, can
             .setDisabled(!canEditThis),
 
         new ButtonBuilder()
-            .setCustomId(fromMine ? `mine:back:${guildId}:${userId}` : `res:back:${guildId}:${userId}`)
-            .setLabel('🔙 戻る')
+            .setCustomId(backCustomId)
+            .setLabel(backLabel)
             .setStyle(ButtonStyle.Secondary)
     );
 
@@ -1148,7 +1161,7 @@ function cameFromMine(k, postId, mineState) {
     return !!mine?.results?.includes(postId);
 }
 
-function renderDetail(interaction, { post, guildId, userId, fromMine, total = 1 }) {
+function renderDetail(interaction, { post, guildId, userId, fromMine, total = 1, forceHomeBack = false }) {
     const detail = buildPostEmbedForView(post);
     detail.setTitle(`📄 詳細  ${post.name}`.trim());
 
@@ -1156,6 +1169,7 @@ function renderDetail(interaction, { post, guildId, userId, fromMine, total = 1 
         fromMine,
         canEditThis: canEdit(interaction, post),
         total,
+        forceHomeBack,
     });
 
     return { detail, components };
@@ -1264,8 +1278,16 @@ client.on(Events.InteractionCreate, async interaction => {
                 const wait = awaitingPhoto.get(k);
                 awaitingPhoto.delete(k);
 
-                // 詳細画面から写真追加に来た場合は、詳細へ戻す
-                if (wait?.backTo === 'detail' && wait.postId) {
+                if (!wait) {
+                    return interaction.update({
+                        content: '',
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+                }
+
+                // 詳細画面から来た場合は詳細へ戻す
+                if (wait.backTo === 'detail' && wait.postId) {
                     await ensureCacheLoadedForGuild(interaction.guild);
                     const cache = getGuildCache(guildId);
                     const post = cache.get(wait.postId);
@@ -1287,40 +1309,45 @@ client.on(Events.InteractionCreate, async interaction => {
                             components,
                         });
                     }
+
+                    return interaction.update({
+                        content: '',
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
                 }
 
-                // 新規登録後なら「詳細を開くか確認」
-                if (wait?.backTo === 'home' && wait.postId) {
+                // 新規登録後なら詳細を開くか確認
+                if (wait.backTo === 'home' && wait.postId) {
                     await ensureCacheLoadedForGuild(interaction.guild);
                     const cache = getGuildCache(guildId);
                     const post = cache.get(wait.postId);
 
-                    if (!post) {
+                    if (post) {
                         return interaction.update({
                             content: '',
-                            embeds: [homeEmbed()],
-                            components: homeComponents(),
+                            embeds: [
+                                confirmEmbed(
+                                    '📄 詳細を開きますか？',
+                                    `**${post.name}**`
+                                )
+                            ],
+                            components: confirmComponents(
+                                'openDetailAfterCreate',
+                                guildId,
+                                userId,
+                                post.id
+                            ),
                         });
                     }
 
                     return interaction.update({
                         content: '',
-                        embeds: [
-                            confirmEmbed(
-                                '📄 詳細を開きますか？',
-                                `**${post.name}**`
-                            )
-                        ],
-                        components: confirmComponents(
-                            'openDetailAfterCreate',
-                            guildId,
-                            userId,
-                            post.id
-                        ),
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
                     });
                 }
 
-                // 念のためフォールバック
                 return interaction.update({
                     content: '',
                     embeds: [homeEmbed()],
@@ -1409,6 +1436,7 @@ client.on(Events.InteractionCreate, async interaction => {
                             userId,
                             fromMine: false,
                             total: 1,
+                            forceHomeBack: true,
                         });
 
                         return interaction.update({
