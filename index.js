@@ -1144,7 +1144,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         return visitFilterMatch(st, p);
     });
 
-    const pageSize = 10;
+    const pageSize = 9;
     let page = Math.max(0, Number(st.page) || 0);
     const maxPage = Math.max(0, Math.ceil(filteredIds.length / pageSize) - 1);
     if (page > maxPage) page = maxPage;
@@ -1217,7 +1217,7 @@ async function renderSearchResultList(interaction, guildId, userId, { update = f
     await ensureCacheLoadedForGuild(interaction.guild);
     const cache = getGuildCache(guildId);
 
-    const pageSize = 10;
+    const pageSize = 9;
     let page = Math.max(0, Number(st.page) || 0);
     const maxPage = Math.max(0, Math.ceil(st.results.length / pageSize) - 1);
     if (page > maxPage) page = maxPage;
@@ -1381,7 +1381,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '検索結果がありません' });
                 }
 
-                const pageSize = 10;
+                const pageSize = 9;
                 const maxPage = Math.max(0, Math.ceil(st.results.length / pageSize) - 1);
 
                 st.page = Number(st.page) || 0;
@@ -2820,7 +2820,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 return visitFilterMatch(st, p);
             });
 
-            const pageSize = 10;
+            const pageSize = 9;
             const maxPage = Math.max(0, Math.ceil(filteredIds.length / pageSize) - 1);
 
             st.page = Number(st.page) || 0;
