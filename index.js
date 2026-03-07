@@ -97,7 +97,26 @@ const prefPromptRef = new Map();
 // { postId, idx }
 const photoView = new Map();
 
+// 詳細画面の戻り先状態 key: guildId:userId -> { postId, fromMine, forceHomeBack }
+const detailNavState = new Map();
+
 // ====== util ======
+function setDetailNavState(guildId, userId, postId, { fromMine = false, forceHomeBack = false } = {}) {
+    const k = keyOf(guildId, userId);
+    detailNavState.set(k, {
+        postId,
+        fromMine,
+        forceHomeBack,
+    });
+}
+
+function getDetailNavState(guildId, userId, postId) {
+    const k = keyOf(guildId, userId);
+    const st = detailNavState.get(k);
+    if (st && st.postId === postId) return st;
+    return null;
+}
+
 async function blankCurrentMessage(interaction) {
     try {
         if (!interaction?.message?.id) return;
@@ -589,6 +608,17 @@ function photoWaitingEmbed(name) {
             `**${name}** を登録しました\n` +
             'このチャンネルに写真を送信してください\n' +
             '送信した画像をすべて追加します。投稿後、Botが元メッセージを削除します'
+        );
+}
+
+function photoCreateWaitingEmbed(name) {
+    return new EmbedBuilder()
+        .setTitle('✅ 登録完了 / 📷 写真追加')
+        .setDescription(
+            `**${name}** を登録しました\n\n` +
+            'このチャンネルに写真を送信してください\n' +
+            '送信した画像をすべてこの記録に追加します\n' +
+            '投稿後、Botが元メッセージを削除します'
         );
 }
 
@@ -1161,7 +1191,15 @@ function cameFromMine(k, postId, mineState) {
     return !!mine?.results?.includes(postId);
 }
 
-function renderDetail(interaction, { post, guildId, userId, fromMine, total = 1, forceHomeBack = false }) {
+function renderDetail(
+    interaction,
+    { post, guildId, userId, fromMine, total = 1, forceHomeBack = false }
+) {
+    setDetailNavState(guildId, userId, post.id, {
+        fromMine,
+        forceHomeBack,
+    });
+
     const detail = buildPostEmbedForView(post);
     detail.setTitle(`📄 詳細  ${post.name}`.trim());
 
@@ -1215,16 +1253,20 @@ async function renderSearchResult(interaction, guildId, userId, { update = false
         return renderSearchResult(interaction, guildId, userId, { update });
     }
 
-    const embed = buildPostEmbedForView(post);
-    embed.setTitle(`🔎 検索結果 (${idx + 1}/${st.results.length})  ${post.name}`.trim());
+    const { detail, components } = renderDetail(interaction, {
+        post,
+        guildId,
+        userId,
+        fromMine: false,
+        total: st.results.length,
+        forceHomeBack: false,
+    });
+
+    detail.setTitle(`🔎 検索結果 (${idx + 1}/${st.results.length})  ${post.name}`.trim());
 
     const payload = {
-        embeds: [embed],
-        components: detailActionComponents(guildId, userId, postId, {
-            fromMine: false,
-            canEditThis: canEdit(interaction, post),
-            total: st.results.length,
-        }),
+        embeds: [detail],
+        components,
     };
 
     if (update) return updateLike(interaction, payload);
@@ -1293,14 +1335,17 @@ client.on(Events.InteractionCreate, async interaction => {
                     const post = cache.get(wait.postId);
 
                     if (post) {
-                        const fromMine = cameFromMine(k, wait.postId, mineState);
+                        const nav = getDetailNavState(guildId, userId, wait.postId);
+                        const fromMine = nav?.fromMine ?? cameFromMine(k, wait.postId, mineState);
+                        const forceHomeBack = nav?.forceHomeBack ?? false;
 
                         const { detail, components } = renderDetail(interaction, {
                             post,
                             guildId,
                             userId,
                             fromMine,
-                            total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
+                            total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                            forceHomeBack,
                         });
 
                         await interaction.update({
@@ -1395,14 +1440,17 @@ client.on(Events.InteractionCreate, async interaction => {
                 const post = cache.get(wait.postId);
 
                 if (post) {
-                    const fromMine = cameFromMine(k, wait.postId, mineState);
+                    const nav = getDetailNavState(guildId, userId, wait.postId);
+                    const fromMine = nav?.fromMine ?? cameFromMine(k, wait.postId, mineState);
+                    const forceHomeBack = nav?.forceHomeBack ?? false;
 
                     const { detail, components } = renderDetail(interaction, {
                         post,
                         guildId,
                         userId,
                         fromMine,
-                        total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
+                        total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                        forceHomeBack,
                     });
 
                     return interaction.update({
@@ -2275,13 +2323,17 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.channel.send({ embeds });
             }
 
-            const fromMine = cameFromMine(k, postId, mineState);
+            const nav = getDetailNavState(guildId, userId, postId);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
+
             const { detail, components } = renderDetail(interaction, {
                 post: fresh,
                 guildId,
                 userId,
                 fromMine,
-                total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
+                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                forceHomeBack,
             });
 
             await interaction.update({
@@ -2478,13 +2530,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 const detail = buildPostEmbedForView(post);
                 detail.setTitle(`📄 詳細  ${post.name}`.trim());
 
-                const mine = mineState.get(k);
-                const fromMine = mine?.results?.includes(postId);
+                const nav = getDetailNavState(guildId, userId, postId);
+                const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+                const forceHomeBack = nav?.forceHomeBack ?? false;
 
                 const components = detailActionComponents(guildId, userId, postId, {
                     fromMine,
                     canEditThis: canEdit(interaction, post),
-                    total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
+                    total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                    forceHomeBack,
                 });
 
                 await interaction.update({ embeds: [detail], components });
@@ -2713,17 +2767,19 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            const embed = buildPostEmbedForView(post);
-            embed.setTitle(`📄 詳細  ${post.name}`.trim());
+            const { detail, components } = renderDetail(interaction, {
+                post,
+                guildId,
+                userId,
+                fromMine: true,
+                total: 1,
+                forceHomeBack: false,
+            });
 
             await interaction.editReply({
                 content: '',
-                embeds: [embed],
-                components: detailActionComponents(guildId, userId, postId, {
-                    fromMine: true,
-                    canEditThis: true,
-                    total: 1,
-                }),
+                embeds: [detail],
+                components,
             });
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
             return;
@@ -2871,8 +2927,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 cache.set(post.id, post);
 
                 const homePayload = {
-                    content: `✅ **${post.name}** を登録しました\n写真を送るとこの記録に追加されます`,
-                    embeds: [],
+                    content: '',
+                    embeds: [photoCreateWaitingEmbed(post.name)],
                     components: photoWaitingComponentsForCreate(guildId, userId),
                 };
 
@@ -2963,8 +3019,18 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 cache.set(postId, post);
 
-                const fromMine = cameFromMine(k, postId, mineState);
-                const { detail, components } = renderDetail(interaction, { post, guildId, userId, fromMine });
+                const nav = getDetailNavState(guildId, userId, postId);
+                const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+                const forceHomeBack = nav?.forceHomeBack ?? false;
+
+                const { detail, components } = renderDetail(interaction, {
+                    post,
+                    guildId,
+                    userId,
+                    fromMine,
+                    total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                    forceHomeBack,
+                });
 
                 await interaction.reply({
                     ephemeral: true,
@@ -3123,7 +3189,9 @@ client.on(Events.MessageCreate, async msg => {
                 const detail = buildPostEmbedForView(post);
                 detail.setTitle(`📄 詳細  ${post.name}`.trim());
 
-                const fromMine = cameFromMine(k, post.id, mineState);
+                const nav = getDetailNavState(msg.guildId, msg.author.id, post.id);
+                const fromMine = nav?.fromMine ?? cameFromMine(k, post.id, mineState);
+                const forceHomeBack = nav?.forceHomeBack ?? false;
 
                 await editPromptRef(wait.uiMessageRef, {
                     content: `✅ **${post.name}** に写真を追加しました`,
@@ -3135,7 +3203,8 @@ client.on(Events.MessageCreate, async msg => {
                         {
                             fromMine,
                             canEditThis: true,
-                            total: fromMine ? 1 : (searchState.get(k)?.results?.length || 1),
+                            total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                            forceHomeBack,
                         }
                     ),
                 });
