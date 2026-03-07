@@ -1020,8 +1020,28 @@ function photoManagerComponents(guildId, userId, postId, hasAny) {
     ];
 }
 
-function confirmComponents(kind, guildId, userId, postId, extra = '') {
-    return [
+function confirmComponents(kind, guildId, userId, postId, extra = '', hasImages = true) {
+    const rows = [];
+
+    if (kind === 'deletePost') {
+        rows.push(
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`delimg:prev:${guildId}:${userId}:${postId}:${extra}`)
+                    .setLabel('◀')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(!hasImages),
+
+                new ButtonBuilder()
+                    .setCustomId(`delimg:next:${guildId}:${userId}:${postId}:${extra}`)
+                    .setLabel('▶')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(!hasImages)
+            )
+        );
+    }
+
+    rows.push(
         new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId(`confirm:yes:${kind}:${guildId}:${userId}:${postId}:${extra}`)
@@ -1031,8 +1051,10 @@ function confirmComponents(kind, guildId, userId, postId, extra = '') {
                 .setCustomId(`confirm:no:${kind}:${guildId}:${userId}:${postId}:${extra}`)
                 .setLabel('いいえ')
                 .setStyle(ButtonStyle.Secondary)
-        ),
-    ];
+        )
+    );
+
+    return rows;
 }
 
 function confirmEmbed(title, message) {
@@ -1608,6 +1630,58 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 uiMessages.set(k, new Set([interaction.message.id]));
                 return;
+            }
+
+            if (id.startsWith('delimg:')) {
+                const [, dir, gid, ownerId, postId, idxStr] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                await ensureCacheLoadedForGuild(interaction.guild);
+                const cache = getGuildCache(guildId);
+                const post = cache.get(postId);
+
+                if (!post) {
+                    return interaction.update({
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+                }
+
+                if (!canEdit(interaction, post)) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: '削除できるのは登録者または管理者のみです'
+                    });
+                }
+
+                const urls = imageUrls(post);
+                if (!urls.length) {
+                    return interaction.update({
+                        content: '',
+                        embeds: [confirmDeletePostEmbed(post, { imageIndex: 0 })],
+                        components: confirmComponents('deletePost', guildId, userId, postId, '0', false),
+                    });
+                }
+
+                let idx = Math.max(0, Math.min(urls.length - 1, Number(idxStr) || 0));
+
+                if (dir === 'prev') {
+                    idx = (idx - 1 + urls.length) % urls.length;
+                } else {
+                    idx = (idx + 1) % urls.length;
+                }
+
+                return interaction.update({
+                    content: '',
+                    embeds: [confirmDeletePostEmbed(post, { imageIndex: idx })],
+                    components: confirmComponents('deletePost', guildId, userId, postId, String(idx), urls.length > 1),
+                });
             }
         }
 
@@ -2863,7 +2937,7 @@ client.on(Events.InteractionCreate, async interaction => {
             return interaction.update({
                 content: '',
                 embeds: [confirmDeletePostEmbed(post, { imageIndex: idx })],
-                components: confirmComponents('deletePost', guildId, userId, postId),
+                components: confirmComponents('deletePost', guildId, userId, postId, String(idx), urls.length > 1),
             });
         }
 
