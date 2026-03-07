@@ -1023,17 +1023,17 @@ function photoManagerComponents(guildId, userId, postId, hasAny) {
 function confirmComponents(kind, guildId, userId, postId, extra = '', hasImages = true) {
     const rows = [];
 
-    if (kind === 'deletePost') {
+    if (kind === 'deletePost' || kind === 'deleteAllPhotos') {
         rows.push(
             new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
-                    .setCustomId(`delimg:prev:${guildId}:${userId}:${postId}:${extra}`)
+                    .setCustomId(`delimg:prev:${guildId}:${userId}:${postId}:${extra}:${kind}`)
                     .setLabel('◀')
                     .setStyle(ButtonStyle.Secondary)
                     .setDisabled(!hasImages),
 
                 new ButtonBuilder()
-                    .setCustomId(`delimg:next:${guildId}:${userId}:${postId}:${extra}`)
+                    .setCustomId(`delimg:next:${guildId}:${userId}:${postId}:${extra}:${kind}`)
                     .setLabel('▶')
                     .setStyle(ButtonStyle.Secondary)
                     .setDisabled(!hasImages)
@@ -1633,7 +1633,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (id.startsWith('delimg:')) {
-                const [, dir, gid, ownerId, postId, idxStr] = id.split(':');
+                const [, dir, gid, ownerId, postId, idxStr, kind = 'deletePost'] = id.split(':');
 
                 if (interaction.guildId !== gid) {
                     return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
@@ -1662,6 +1662,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const urls = imageUrls(post);
                 if (!urls.length) {
+                    if (kind === 'deleteAllPhotos') {
+                        return interaction.update({
+                            content: '',
+                            embeds: [confirmDeleteAllPhotosEmbed(post)],
+                            components: confirmComponents('deleteAllPhotos', guildId, userId, postId, '0', false),
+                        });
+                    }
+
                     return interaction.update({
                         content: '',
                         embeds: [confirmDeletePostEmbed(post, { imageIndex: 0 })],
@@ -1675,6 +1683,19 @@ client.on(Events.InteractionCreate, async interaction => {
                     idx = (idx - 1 + urls.length) % urls.length;
                 } else {
                     idx = (idx + 1) % urls.length;
+                }
+
+                if (kind === 'deleteAllPhotos') {
+                    const embed = new EmbedBuilder()
+                        .setTitle('⚠ 写真をすべて削除')
+                        .setDescription(`**${post.name}** の写真をすべて削除しますか？\n写真 ${idx + 1}/${urls.length}`)
+                        .setImage(urls[idx]);
+
+                    return interaction.update({
+                        content: '',
+                        embeds: [embed],
+                        components: confirmComponents('deleteAllPhotos', guildId, userId, postId, String(idx), urls.length > 1),
+                    });
                 }
 
                 return interaction.update({
