@@ -1549,41 +1549,7 @@ client.on(Events.InteractionCreate, async interaction => {
             visitedDatePromptRef.delete(k);
             prefPromptRef.delete(k);
 
-            const wait = awaitingPhoto.get(k);
-            awaitingPhoto.delete(k);
-
-            // 1) 写真追加待ちからの中断 → 詳細へ戻す
-            if (wait?.backTo === 'detail' && wait.postId) {
-                await ensureCacheLoadedForGuild(interaction.guild);
-                const cache = getGuildCache(guildId);
-                const post = cache.get(wait.postId);
-
-                if (post) {
-                    const nav = getDetailNavState(guildId, userId, wait.postId);
-                    const fromMine = nav?.fromMine ?? cameFromMine(k, wait.postId, mineState);
-                    const forceHomeBack = nav?.forceHomeBack ?? false;
-
-                    const { detail, components } = renderDetail(interaction, {
-                        post,
-                        guildId,
-                        userId,
-                        fromMine,
-                        total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-                        forceHomeBack,
-                    });
-
-                    await interaction.update({
-                        content: '',
-                        embeds: [detail],
-                        components,
-                    });
-
-                    uiMessages.set(k, new Set([interaction.message.id]));
-                    return;
-                }
-            }
-
-            // 2) 編集フローからの中断 → 元の詳細へ戻す
+            // 編集フロー中断 → 元の詳細へ戻す
             if (draft?.mode === 'edit' && draft?.postId) {
                 await ensureCacheLoadedForGuild(interaction.guild);
                 const cache = getGuildCache(guildId);
@@ -1614,12 +1580,15 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
             }
+
+            // 新規作成フロー中断 → ホーム
             await interaction.update({
                 content: '',
                 embeds: [homeEmbed()],
                 components: homeComponents(),
             });
 
+            uiMessages.set(k, new Set([interaction.message.id]));
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
             return;
         }
@@ -2597,6 +2566,17 @@ client.on(Events.InteractionCreate, async interaction => {
             setDetailNavState(guildId, userId, postId, {
                 fromMine: nav?.fromMine ?? cameFromMine(k, postId, mineState),
                 forceHomeBack: nav?.forceHomeBack ?? false,
+            });
+
+            // 編集開始時点で元データを保持
+            draftRating.set(k, {
+                mode: 'edit',
+                postId,
+                visited: post.visited !== false,
+                rating: post.rating ?? null,
+                prefecture: post.prefecture ?? '',
+                visitedDate: post.visited_date ?? '',
+                channelId: interaction.channelId,
             });
 
             await interaction.update({
