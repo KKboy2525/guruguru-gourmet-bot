@@ -1188,6 +1188,72 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     await rememberUiReply(interaction, guildId, userId);
 }
 
+async function renderSearchResultList(interaction, guildId, userId, { update = false } = {}) {
+    const k = keyOf(guildId, userId);
+    const st = searchState.get(k);
+
+    if (!st?.results?.length) {
+        const panel = searchState.get(k) ?? {
+            userIdFilter: null,
+            prefectureFilters: [],
+            keyword: '',
+            ratingFilters: [],
+            results: [],
+            page: 0
+        };
+
+        const payload = {
+            embeds: [searchPanelEmbed(panel)],
+            components: searchPanelComponents(guildId, userId, panel),
+        };
+
+        if (update) return updateLike(interaction, payload);
+
+        await interaction.reply({ ephemeral: true, ...payload });
+        await rememberUiReply(interaction, guildId, userId);
+        return;
+    }
+
+    await ensureCacheLoadedForGuild(interaction.guild);
+    const cache = getGuildCache(guildId);
+
+    const pageSize = 10;
+    let page = Math.max(0, Number(st.page) || 0);
+    const maxPage = Math.max(0, Math.ceil(st.results.length / pageSize) - 1);
+    if (page > maxPage) page = maxPage;
+    st.page = page;
+    searchState.set(k, st);
+
+    const start = page * pageSize;
+    const slice = st.results
+        .slice(start, start + pageSize)
+        .map(pid => cache.get(pid))
+        .filter(Boolean);
+
+    const header = new EmbedBuilder()
+        .setTitle('🔎 検索結果一覧')
+        .setDescription(`表示 ${st.results.length ? start + 1 : 0}-${start + slice.length} / ${st.results.length} 件`);
+
+    const options = slice.slice(0, 25).map(p => ({
+        label: (p.name ?? '').slice(0, 100),
+        description: `${visitLabel(p)} / ${p.prefecture || '未設定'}`.slice(0, 100),
+        value: p.id,
+    }));
+
+    const hasPrev = page > 0;
+    const hasNext = start + pageSize < st.results.length;
+
+    const embeds = [header, ...slice.map(buildCardEmbed)];
+    const components = searchResultListComponents(guildId, userId, page, hasPrev, hasNext, options);
+
+    const payload = { embeds, components };
+
+    if (update) return updateLike(interaction, payload);
+
+    await interaction.reply({ ephemeral: true, ...payload });
+    await rememberUiReply(interaction, guildId, userId);
+}
+
 function detailActionComponents(
     guildId,
     userId,
@@ -1274,69 +1340,6 @@ function renderDetail(
     });
 
     return { detail, components };
-}
-
-async function renderSearchResult(interaction, guildId, userId, { update = false } = {}) {
-    const k = keyOf(guildId, userId);
-    const st = searchState.get(k);
-    if (!st?.results?.length) {
-        const panel = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-        const payload = {
-            embeds: [searchPanelEmbed(panel)],
-            components: searchPanelComponents(guildId, userId, panel)
-        };
-        if (update) return updateLike(interaction, payload);
-
-        await interaction.reply({ ephemeral: true, ...payload });
-        await rememberUiReply(interaction, guildId, userId);
-        return;
-    }
-
-    await ensureCacheLoadedForGuild(interaction.guild);
-    const cache = getGuildCache(guildId);
-
-    const idx = Math.max(0, Math.min(st.results.length - 1, Number(st.idx) || 0));
-    st.idx = idx;
-    searchState.set(k, st);
-
-    const postId = st.results[idx];
-    const post = cache.get(postId);
-    if (!post) {
-        // 消えてたら再描画で回避
-        st.results = st.results.filter(x => x !== postId);
-        st.idx = 0;
-        searchState.set(k, st);
-        return renderSearchResult(interaction, guildId, userId, { update });
-    }
-
-    const { detail, components } = renderDetail(interaction, {
-        post,
-        guildId,
-        userId,
-        fromMine: false,
-        total: 1,
-        forceHomeBack: false,
-    });
-
-    detail.setTitle(`🔎 検索結果 (${idx + 1}/${st.results.length})  ${post.name}`.trim());
-
-    const payload = {
-        embeds: [detail],
-        components,
-    };
-
-    if (update) return updateLike(interaction, payload);
-
-    await interaction.reply({ ephemeral: true, ...payload });
-    await rememberUiReply(interaction, guildId, userId);
-    return;
 }
 
 // ====== interactions ======
@@ -2981,7 +2984,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     userId,
                     fromMine: false,
                     total: 1,
-                    forceHomeBack: true,
+                    forceHomeBack: false,
                 });
 
                 return interaction.update({
