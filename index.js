@@ -3074,7 +3074,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.update({
                     content: '',
                     embeds: [confirmDeleteAllPhotosEmbed(post)],
-                    components: confirmComponents('deleteAllPhotos', guildId, ownerId, postId),
+                    components: confirmComponents(
+                        'deleteAllPhotos',
+                        guildId,
+                        ownerId,
+                        postId,
+                        '0',
+                        imgs.length > 1
+                    ),
                 });
             }
 
