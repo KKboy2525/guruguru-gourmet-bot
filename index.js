@@ -600,9 +600,10 @@ function photoWaitingEmbed(name) {
     return new EmbedBuilder()
         .setTitle('📷 写真追加')
         .setDescription(
-            `**${name}** を登録しました\n` +
+            `**${name}** を登録しました\n\n` +
             'このチャンネルに写真を送信してください\n' +
-            '送信した画像をすべて追加します。投稿後、Botが元メッセージを削除します'
+            '送信した画像をすべてこの記録に追加します\n' +
+            '投稿後、Botが元メッセージを削除します'
         );
 }
 
@@ -1436,6 +1437,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
             }
 
+            const draft = draftRating.get(k);
+
             draftRating.delete(k);
             visitedDatePromptRef.delete(k);
             prefPromptRef.delete(k);
@@ -1443,6 +1446,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const wait = awaitingPhoto.get(k);
             awaitingPhoto.delete(k);
 
+            // 1) 写真追加待ちからの中断 → 詳細へ戻す
             if (wait?.backTo === 'detail' && wait.postId) {
                 await ensureCacheLoadedForGuild(interaction.guild);
                 const cache = getGuildCache(guildId);
@@ -1467,6 +1471,37 @@ client.on(Events.InteractionCreate, async interaction => {
                         embeds: [detail],
                         components,
                     });
+                }
+            }
+
+            // 2) 編集フローからの中断 → 元の詳細へ戻す
+            if (draft?.mode === 'edit' && draft?.postId) {
+                await ensureCacheLoadedForGuild(interaction.guild);
+                const cache = getGuildCache(guildId);
+                const post = cache.get(draft.postId);
+
+                if (post) {
+                    const nav = getDetailNavState(guildId, userId, draft.postId);
+                    const fromMine = nav?.fromMine ?? cameFromMine(k, draft.postId, mineState);
+                    const forceHomeBack = nav?.forceHomeBack ?? false;
+
+                    const { detail, components } = renderDetail(interaction, {
+                        post,
+                        guildId,
+                        userId,
+                        fromMine,
+                        total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                        forceHomeBack,
+                    });
+
+                    await interaction.update({
+                        content: '',
+                        embeds: [detail],
+                        components,
+                    });
+
+                    await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                    return;
                 }
             }
 
