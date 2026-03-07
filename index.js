@@ -4468,59 +4468,41 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
                 const d = draftRating.get(k);
-                if (!d || d.mode !== 'create') return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+                if (!d || d.mode !== 'create') {
+                    return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+                }
 
                 const name = interaction.fields.getTextInputValue('name')?.trim();
-                if (!name) return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
+                if (!name) {
+                    return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
+                }
 
                 d.name = name;
                 draftRating.set(k, d);
 
                 await interaction.deferReply({ ephemeral: true });
 
-                const post = {
-                    id: 'TEMP',
-                    name: d.name,
-                    visited: d.visited !== false,
-                    rating: d.visited === false ? null : d.rating,
-                    comment: d.comment ?? '',
-                    url: d.url ?? '',
-                    map_url: d.mapUrl ?? '',
-                    visited_date: d.visited === false ? '' : (d.visitedDate ?? ''),
-                    tags: d.tags ?? [],
-                    prefecture: d.prefecture ?? '',
-                    images: [],
-                    created_by: userId,
-                    created_at: nowIso(),
-                    updated_at: nowIso(),
-                };
+                const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
 
-                await ensureCacheLoadedForGuild(interaction.guild);
-                const cache = getGuildCache(guildId);
-
-                const dbCh = await getDbChannelForGuild(interaction.guild);
-                const sent = await dbCh.send({ embeds: [buildPostEmbedForDb({ ...post, id: '0' })] });
-
-                post.id = sent.id;
-                await sent.edit({ embeds: [buildPostEmbedForDb(post)] });
-                cache.set(post.id, post);
-
-                draftRating.delete(k);
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
 
                 await interaction.editReply({
-                    embeds: [photoCreateWaitingEmbed(post.name)],
-                    components: photoWaitingComponentsForCreate(guildId, userId),
+                    content: '',
+                    embeds: [buildCreatePanelEmbed(d)],
+                    components: createPanelComponents(guildId, userId, d),
                 });
 
-                const replyMsg = await interaction.fetchReply().catch(() => null);
-                awaitingPhoto.set(k, {
-                    postId: post.id,
-                    channelId: interaction.channelId,
-                    guildId,
-                    backTo: 'home',
-                    uiMessageRef: replyMsg?.id ? { webhook: interaction.webhook, messageId: replyMsg.id } : null,
-                });
-
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    createPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
                 return;
             }
 
