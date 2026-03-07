@@ -76,6 +76,9 @@ const draftRating = new Map();
 // key: guildId:userId -> Set(messageId)
 const uiMessages = new Map();
 
+// 詳細画面の写真表示状態 key: guildId:userId -> { postId, idx }
+const detailPhotoView = new Map();
+
 // 検索状態 key: guildId:userId
 // { userIdFilter?:string[]|null, prefectureFilters?:string[], keyword?:string, results?:string[], page?:number, ratingFilters?:number[] }
 const searchState = new Map();
@@ -399,7 +402,7 @@ async function getDbChannelForGuild(guild) {
     return ch;
 }
 
-function buildPostEmbedForView(post, { sharedByUserId = null } = {}) {
+function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null } = {}) {
     const lines = [];
 
     lines.push(visitLabel(post));
@@ -427,6 +430,12 @@ function buildPostEmbedForView(post, { sharedByUserId = null } = {}) {
         lines.push(`📤 共有 <@${sharedByUserId}>`);
     }
 
+    const urls = imageUrls(post);
+    if (urls.length) {
+        const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
+        lines.push(`📷 写真 ${idx + 1}/${urls.length}`);
+    }
+
     const fields = [
         { name: '🔗 Webサイト', value: post.url || '(なし)' },
         { name: '📍 場所', value: post.map_url || '(なし)' },
@@ -441,9 +450,10 @@ function buildPostEmbedForView(post, { sharedByUserId = null } = {}) {
         e.setFooter({ text: `更新: ${formatJst(post.updated_at)}` });
     }
 
-    const urls = imageUrls(post);
-    const mainImage = urls.length ? urls[urls.length - 1] : null;
-    if (mainImage) e.setImage(mainImage);
+    if (urls.length) {
+        const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
+        e.setImage(urls[idx]);
+    }
 
     return e;
 }
@@ -1285,20 +1295,20 @@ function detailActionComponents(
     guildId,
     userId,
     postId,
-    { fromMine = false, canEditThis = true, total = 1, forceHomeBack = false } = {}
+    { fromMine = false, canEditThis = true, total = 1, forceHomeBack = false, hasPhotos = false } = {}
 ) {
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId(`res:prev:${guildId}:${userId}`)
+            .setCustomId(`res:prev:${guildId}:${userId}:${postId}`)
             .setLabel('◀')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(fromMine || forceHomeBack || total <= 1),
+            .setDisabled(!hasPhotos),
 
         new ButtonBuilder()
-            .setCustomId(`res:next:${guildId}:${userId}`)
+            .setCustomId(`res:next:${guildId}:${userId}:${postId}`)
             .setLabel('▶')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(fromMine || forceHomeBack || total <= 1),
+            .setDisabled(!hasPhotos),
 
         new ButtonBuilder()
             .setCustomId(`res:share:${guildId}:${userId}:${postId}`)
@@ -1356,7 +1366,20 @@ function renderDetail(
         forceHomeBack,
     });
 
-    const detail = buildPostEmbedForView(post);
+    const k = keyOf(guildId, userId);
+    const urls = imageUrls(post);
+
+    let idx = 0;
+    const pv = detailPhotoView.get(k);
+
+    if (pv?.postId === post.id) {
+        idx = Math.max(0, Math.min(urls.length - 1, Number(pv.idx) || 0));
+    } else {
+        idx = Math.max(0, urls.length - 1); // 初回は最後の写真
+        detailPhotoView.set(k, { postId: post.id, idx });
+    }
+
+    const detail = buildPostEmbedForView(post, { imageIndex: idx });
     detail.setTitle(`📄 詳細  ${post.name}`.trim());
 
     const components = detailActionComponents(guildId, userId, post.id, {
@@ -1364,6 +1387,7 @@ function renderDetail(
         canEditThis: canEdit(interaction, post),
         total,
         forceHomeBack,
+        hasPhotos: urls.length > 1,
     });
 
     return { detail, components };
@@ -1675,8 +1699,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
-                if (interaction.user.id !== post.created_by) {
-                    return interaction.reply({ ephemeral: true, content: '削除できるのは登録者のみです' });
+                if (!canEdit(interaction, post)) {
+                    return interaction.reply({ ephemeral: true, content: '削除できるのは登録者または管理者のみです' });
                 }
 
                 const fromMine = cameFromMine(k, postId, mineState);
@@ -2502,6 +2526,69 @@ client.on(Events.InteractionCreate, async interaction => {
             });
         }
 
+        if (id.startsWith('res:prev:') || id.startsWith('res:next:')) {
+            const [, action, gid, ownerId, postId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+
+            const urls = imageUrls(post);
+            if (urls.length <= 1) {
+                const nav = getDetailNavState(guildId, userId, postId);
+                const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+                const forceHomeBack = nav?.forceHomeBack ?? false;
+
+                const { detail, components } = renderDetail(interaction, {
+                    post,
+                    guildId,
+                    userId,
+                    fromMine,
+                    total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                    forceHomeBack,
+                });
+
+                return interaction.update({
+                    content: '',
+                    embeds: [detail],
+                    components,
+                });
+            }
+
+            const pv = detailPhotoView.get(k) ?? { postId, idx: Math.max(0, urls.length - 1) };
+            pv.postId = postId;
+
+            if (action === 'prev') {
+                pv.idx = (pv.idx - 1 + urls.length) % urls.length;
+            } else {
+                pv.idx = (pv.idx + 1) % urls.length;
+            }
+
+            detailPhotoView.set(k, pv);
+
+            const nav = getDetailNavState(guildId, userId, postId);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
+
+            const { detail, components } = renderDetail(interaction, {
+                post,
+                guildId,
+                userId,
+                fromMine,
+                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                forceHomeBack,
+            });
+
+            return interaction.update({
+                content: '',
+                embeds: [detail],
+                components,
+            });
+        }
+
         // Share
         if (id.startsWith('res:share:')) {
             const [, , gid, ownerId, postId] = id.split(':');
@@ -2769,16 +2856,15 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (action === 'back') {
-                const detail = buildPostEmbedForView(post);
-                detail.setTitle(`📄 詳細  ${post.name}`.trim());
-
                 const nav = getDetailNavState(guildId, userId, postId);
                 const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
                 const forceHomeBack = nav?.forceHomeBack ?? false;
 
-                const components = detailActionComponents(guildId, userId, postId, {
+                const { detail, components } = renderDetail(interaction, {
+                    post,
+                    guildId,
+                    userId,
                     fromMine,
-                    canEditThis: canEdit(interaction, post),
                     total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
                     forceHomeBack,
                 });
@@ -3489,27 +3575,26 @@ client.on(Events.MessageCreate, async msg => {
                     ),
                 });
             } else {
-                const detail = buildPostEmbedForView(post);
-                detail.setTitle(`📄 詳細  ${post.name}`.trim());
-
                 const nav = getDetailNavState(msg.guildId, msg.author.id, post.id);
                 const fromMine = nav?.fromMine ?? cameFromMine(k, post.id, mineState);
                 const forceHomeBack = nav?.forceHomeBack ?? false;
 
+                const { detail, components } = renderDetail(
+                    { guild: msg.guild, user: msg.author, memberPermissions: null },
+                    {
+                        post,
+                        guildId: msg.guildId,
+                        userId: msg.author.id,
+                        fromMine,
+                        total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                        forceHomeBack,
+                    }
+                );
+
                 await editPromptRef(wait.uiMessageRef, {
                     content: `✅ **${post.name}** に写真を追加しました`,
                     embeds: [detail],
-                    components: detailActionComponents(
-                        msg.guildId,
-                        msg.author.id,
-                        post.id,
-                        {
-                            fromMine,
-                            canEditThis: true,
-                            total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-                            forceHomeBack,
-                        }
-                    ),
+                    components,
                 });
             }
         } else if (wait.interaction) {
