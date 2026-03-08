@@ -5,11 +5,19 @@ import express from "express";
 import dotenv from 'dotenv';
 dotenv.config();
 
+const app = express();
+const PORT = Number(process.env.PORT || 5000);
+
+app.get('/', (_req, res) => {
+    res.status(200).send('ok');
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Healthcheck server listening on ${PORT}`);
+});
+
 process.on('unhandledRejection', (reason) => {
     console.error('unhandledRejection:', reason);
-});
-process.on('uncaughtException', (err) => {
-    console.error('uncaughtException:', err);
 });
 
 import {
