@@ -824,9 +824,9 @@ function flowStatusEmbed({ mode, step, postName = '', visited = null }) {
 function buildCreatePanelEmbed(d = {}) {
     const lines = [
         `🍽 お店の名前: ${d.name?.trim() ? d.name : '(未入力)'}`,
-        `✅ 訪問状態: ${d.visited == null ? '未選択' : (d.visited ? '行った' : '行きたい')}`,
+        `✅ 訪問状態: ${d.visited == null ? '(未選択)' : (d.visited ? '行った' : '行きたい')}`,
         ...(d.visited === true
-            ? [`⭐ 評価: ${d.rating ? stars(d.rating) : '未選択（必須）'}`]
+            ? [`⭐ 評価: ${d.rating ? stars(d.rating) : '(未選択)'}`]
             : []),
         `💬 コメント: ${d.comment?.trim() ? d.comment : '(なし)'}`,
         `🗾 都道府県: ${d.prefecture || '(未設定)'}`,
@@ -836,9 +836,9 @@ function buildCreatePanelEmbed(d = {}) {
         `🏷 タグ: ${d.tags?.length ? tagString(d.tags) : '(なし)'}`,
         `🔗 Webサイト: ${d.url || '(なし)'}`,
         `📍 場所: ${d.mapUrl || '(なし)'}`,
-        `📷 写真: 登録後に追加`,
+        `📷 写真: 記録作成後に追加`,
         '',
-        '項目を好きな順番で入力して「作成」を押してください',
+        '項目を入力して「作成」を押してください',
     ];
 
     return new EmbedBuilder()
@@ -849,9 +849,9 @@ function buildCreatePanelEmbed(d = {}) {
 function buildEditPanelEmbed(d = {}) {
     const lines = [
         `🍽 お店の名前: ${d.name?.trim() ? d.name : '(未入力)'}`,
-        `✅ 訪問状態: ${d.visited == null ? '未選択' : (d.visited ? '行った' : '行きたい')}`,
+        `✅ 訪問状態: ${d.visited == null ? '(未選択)' : (d.visited ? '行った' : '行きたい')}`,
         ...(d.visited === true
-            ? [`⭐ 評価: ${d.rating ? stars(d.rating) : '未選択（必須）'}`]
+            ? [`⭐ 評価: ${d.rating ? stars(d.rating) : '(未選択)'}`]
             : []),
         `💬 コメント: ${d.comment?.trim() ? d.comment : '(なし)'}`,
         `🗾 都道府県: ${d.prefecture || '(未設定)'}`,
@@ -863,7 +863,7 @@ function buildEditPanelEmbed(d = {}) {
         `📍 場所: ${d.mapUrl || '(なし)'}`,
         `📷 写真: 写真管理から編集`,
         '',
-        '項目を好きな順番で編集して「更新」を押してください',
+        '項目を編集して「更新」を押してください',
     ];
 
     return new EmbedBuilder()
@@ -3412,7 +3412,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             return interaction.reply({
                 ephemeral: true,
-                content: '写真は登録完了後に追加してください',
+                content: '写真は記録作成後に追加してください',
             });
         }
 
