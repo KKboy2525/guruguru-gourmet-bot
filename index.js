@@ -1150,16 +1150,19 @@ async function rerenderCreatePanelFromRef(interaction, guildId, userId) {
     if (updated) {
         try {
             if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({
+                const okMsg = await interaction.reply({
                     ephemeral: true,
-                    content: '更新しました',
+                    content: '✅ 更新しました',
+                    fetchReply: true,
                 });
-                try { await interaction.deleteReply(); } catch { }
+
+                setTimeout(() => {
+                    okMsg.delete().catch(() => { });
+                }, 2000);
             }
         } catch { }
         return true;
     }
-
     return false;
 }
 
@@ -1187,11 +1190,15 @@ async function rerenderEditPanelFromRef(interaction, guildId, userId) {
     if (updated) {
         try {
             if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({
+                const okMsg = await interaction.reply({
                     ephemeral: true,
-                    content: '更新しました',
+                    content: '✅ 更新しました',
+                    fetchReply: true,
                 });
-                try { await interaction.deleteReply(); } catch { }
+
+                setTimeout(() => {
+                    okMsg.delete().catch(() => { });
+                }, 2000);
             }
         } catch { }
         return true;
@@ -3754,11 +3761,23 @@ client.on(Events.InteractionCreate, async interaction => {
                 forceHomeBack,
             });
 
-            return interaction.update({
-                content: '✅ 更新しました',
+            await interaction.update({
+                content: '',
                 embeds: [detail],
                 components,
             });
+
+            const okMsg = await interaction.followUp({
+                content: '✅ 更新しました',
+                ephemeral: true,
+                fetchReply: true,
+            });
+
+            setTimeout(() => {
+                okMsg.delete().catch(() => { });
+            }, 2000);
+
+            return;
         }
 
         if (id === 'home:create') {
@@ -5470,7 +5489,7 @@ client.on(Events.MessageCreate, async msg => {
                 );
 
                 await editPromptRef(wait.uiMessageRef, {
-                    content: `✅ **${post.name}** に写真を追加しました`,
+                    content: '',
                     embeds: [detail],
                     components,
                 });
