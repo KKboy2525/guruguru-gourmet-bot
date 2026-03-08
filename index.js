@@ -481,8 +481,42 @@ function isImageAttachment(att) {
 
 async function getDbChannelForGuild(guild) {
     const channels = await guild.channels.fetch();
-    const ch = channels.find(c => c && c.isTextBased() && c.name?.toLowerCase() === DB_CHANNEL_NAME);
-    if (!ch) throw new Error(`このサーバーに #${DB_CHANNEL_NAME} がありません作成してください`);
+
+    let ch = channels.find(
+        c =>
+            c &&
+            c.type === 0 &&
+            c.name?.toLowerCase() === DB_CHANNEL_NAME
+    );
+
+    if (ch) return ch;
+
+    const everyone = guild.roles.everyone;
+
+    ch = await guild.channels.create({
+        name: DB_CHANNEL_NAME,
+        type: 0,
+        reason: 'グルメ記録DBチャンネル自動作成',
+
+        permissionOverwrites: [
+            {
+                id: everyone.id,
+                deny: ['ViewChannel'],   // 全員見えない
+            },
+            {
+                id: guild.members.me.id, // Bot
+                allow: [
+                    'ViewChannel',
+                    'SendMessages',
+                    'ReadMessageHistory',
+                    'EmbedLinks',
+                    'AttachFiles',
+                    'ManageMessages'
+                ],
+            },
+        ],
+    });
+
     return ch;
 }
 
@@ -991,7 +1025,7 @@ function editPanelComponents(guildId, userId, d = {}) {
                 .setStyle(ButtonStyle.Primary),
 
             new ButtonBuilder()
-                .setCustomId(`edit:panelBack:${guildId}:${userId}`)
+                .setCustomId(`edit:back:${guildId}:${userId}`)
                 .setLabel('戻る')
                 .setStyle(ButtonStyle.Secondary),
         ),
@@ -2095,16 +2129,24 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.isChatInputCommand()) {
             if (interaction.commandName !== 'gourmet') return;
 
+            await interaction.deferReply({ ephemeral: true });
+
             try {
                 await ensureCacheLoadedForGuild(interaction.guild);
             } catch (e) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: `エラー: ${e.message}\nこのサーバーに **#${DB_CHANNEL_NAME}** を作ってください`,
+                return interaction.editReply({
+                    content: `エラー: ${e.message}`,
+                    embeds: [],
+                    components: [],
                 });
             }
 
-            await interaction.reply({ ephemeral: true, embeds: [homeEmbed()], components: homeComponents() });
+            await interaction.editReply({
+                content: '',
+                embeds: [homeEmbed()],
+                components: homeComponents(),
+            });
+
             await rememberUiReply(interaction, guildId, userId);
             return;
         }
