@@ -2402,7 +2402,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
                 }
 
-                const st = placeSearchState.get(k);
+                let st = placeSearchState.get(k);
 
                 if (!st) {
                     return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
