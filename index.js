@@ -848,13 +848,12 @@ async function searchGooglePlacesText(query, pageToken = '') {
         throw new Error('GOOGLE_MAPS_API_KEY が設定されていません');
     }
 
-    const body = pageToken
-        ? { pageToken }
-        : {
-            textQuery: query,
-            languageCode: 'ja',
-            regionCode: 'JP',
-        };
+    const body = {
+        textQuery: query,
+        languageCode: 'ja',
+        regionCode: 'JP',
+        ...(pageToken ? { pageToken } : {}),
+    };
 
     const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
         method: 'POST',
@@ -2358,11 +2357,9 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.isButton()) {
 
             if (id === 'home:close') {
-                return interaction.update({
-                    content: '\u200b',
-                    embeds: [],
-                    components: [],
-                });
+                await interaction.deferUpdate();
+                await interaction.deleteReply().catch(() => { });
+                return;
             }
 
             if (id.startsWith('place:prev:') || id.startsWith('place:next:')) {
@@ -2403,6 +2400,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
                 if (userId !== ownerId) {
                     return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                if (!st.query) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: '検索語が見つかりません。もう一度お店検索してください',
+                    });
                 }
 
                 const st = placeSearchState.get(k);
