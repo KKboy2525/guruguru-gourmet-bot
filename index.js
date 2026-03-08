@@ -4124,8 +4124,17 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (id === 'home:close') {
+            const mid = interaction.message?.id;
+
             await interaction.deferUpdate();
-            await interaction.message.delete().catch(() => { });
+
+            if (mid) {
+                await interaction.webhook.deleteMessage(mid).catch(() => { });
+            }
+
+            const k = keyOf(guildId, userId);
+            uiMessages.delete(k);
+
             return;
         }
 
@@ -5013,6 +5022,70 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.showModal(
                     buildPlaceSearchModal(gid, ownerId, mode, d.name ?? '')
                 );
+            }
+
+            if (id.startsWith('place:more:')) {
+                const [, , gid, ownerId] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const st = placeSearchState.get(k);
+                if (!st) {
+                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
+                }
+
+                if (!st.nextPageToken) {
+                    return interaction.reply({ ephemeral: true, content: 'これ以上候補がありません' });
+                }
+
+                st.loadingMore = true;
+                placeSearchState.set(k, st);
+
+                await interaction.update({
+                    content: '',
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('🍽 お店検索結果')
+                            .setDescription('追加の候補を読み込み中です...')
+                    ],
+                    components: [],
+                });
+
+                try {
+                    const more = await fetchMoreGooglePlaces(st.query, st.nextPageToken);
+
+                    const exists = new Set((st.results ?? []).map(x => x.placeId));
+                    for (const item of more.results) {
+                        if (!exists.has(item.placeId)) {
+                            st.results.push(item);
+                            exists.add(item.placeId);
+                        }
+                    }
+
+                    st.nextPageToken = more.nextPageToken ?? '';
+                    st.loadingMore = false;
+                    placeSearchState.set(k, st);
+
+                    return interaction.editReply({
+                        content: '',
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+                } catch (e) {
+                    st.loadingMore = false;
+                    placeSearchState.set(k, st);
+
+                    return interaction.editReply({
+                        content: `追加読込に失敗しました: ${e.message}`,
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+                }
             }
 
             if (id.startsWith('place:pick:')) {
