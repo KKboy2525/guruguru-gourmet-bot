@@ -991,7 +991,7 @@ function editPanelComponents(guildId, userId, d = {}) {
                 .setStyle(ButtonStyle.Primary),
 
             new ButtonBuilder()
-                .setCustomId(`edit:back:${guildId}:${userId}`)
+                .setCustomId(`edit:panelBack:${guildId}:${userId}`)
                 .setLabel('戻る')
                 .setStyle(ButtonStyle.Secondary),
         ),
@@ -3575,6 +3575,52 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             return renderEditPanel(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('edit:back:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'edit' || !d.postId) {
+                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+            }
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(d.postId);
+
+            if (!post) {
+                return interaction.update({
+                    content: '',
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
+                });
+            }
+
+            const nav = getDetailNavState(guildId, userId, post.id);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, post.id, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
+
+            const { detail, components } = renderDetail(interaction, {
+                post,
+                guildId,
+                userId,
+                fromMine,
+                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                forceHomeBack,
+            });
+
+            return interaction.update({
+                content: '',
+                embeds: [detail],
+                components,
+            });
         }
 
         if (id.startsWith('edit:photos:')) {
