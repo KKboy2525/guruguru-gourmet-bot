@@ -4140,16 +4140,11 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (id === 'home:close') {
-            try {
-                await interaction.message.delete();
-            } catch {
-                await interaction.update({
-                    content: '',
-                    embeds: [],
-                    components: [],
-                });
-            }
-            return;
+            return interaction.update({
+                content: '',
+                embeds: [],
+                components: [],
+            });
         }
 
         // Search panel
@@ -5038,119 +5033,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 );
             }
 
-            if (id.startsWith('place:prev:') || id.startsWith('place:next:')) {
-                const [, action, gid, ownerId] = id.split(':');
-
-                if (interaction.guildId !== gid) {
-                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-                }
-                if (userId !== ownerId) {
-                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-                }
-
-                const st = placeSearchState.get(k);
-                if (!st) {
-                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
-                }
-
-                const maxPage = Math.max(0, Math.ceil((st.results?.length || 0) / PLACE_PAGE_SIZE) - 1);
-                st.page = Number(st.page) || 0;
-                st.page += action === 'prev' ? -1 : 1;
-                if (st.page < 0) st.page = 0;
-                if (st.page > maxPage) st.page = maxPage;
-
-                placeSearchState.set(k, st);
-
-                return renderPlaceSearchPicker(interaction, guildId, userId, { update: true });
-            }
-
-            if (id.startsWith('place:more:')) {
-                const [, , gid, ownerId] = id.split(':');
-
-                if (interaction.guildId !== gid) {
-                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-                }
-                if (userId !== ownerId) {
-                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-                }
-
-                const st = placeSearchState.get(k);
-                if (!st) {
-                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
-                }
-
-                if (!st.nextPageToken) {
-                    return interaction.reply({ ephemeral: true, content: 'これ以上候補がありません' });
-                }
-
-                st.loadingMore = true;
-                placeSearchState.set(k, st);
-
-                await interaction.update({
-                    content: '',
-                    embeds: [
-                        new EmbedBuilder()
-                            .setTitle('🍽 お店検索結果')
-                            .setDescription('追加の候補を読み込み中です...')
-                    ],
-                    components: [],
-                });
-
-                try {
-                    const more = await fetchMoreGooglePlaces(st.query, st.nextPageToken);
-
-                    const exists = new Set((st.results ?? []).map(x => x.placeId));
-                    for (const item of more.results) {
-                        if (!exists.has(item.placeId)) {
-                            st.results.push(item);
-                            exists.add(item.placeId);
-                        }
-                    }
-
-                    st.nextPageToken = more.nextPageToken ?? '';
-                    st.loadingMore = false;
-
-                    placeSearchState.set(k, st);
-
-                    return interaction.editReply({
-                        content: '',
-                        embeds: [buildPlaceSearchEmbed(st)],
-                        components: placeSearchComponents(guildId, userId, st),
-                    });
-                } catch (e) {
-                    st.loadingMore = false;
-                    placeSearchState.set(k, st);
-
-                    return interaction.editReply({
-                        content: `追加読込に失敗しました: ${e.message}`,
-                        embeds: [buildPlaceSearchEmbed(st)],
-                        components: placeSearchComponents(guildId, userId, st),
-                    });
-                }
-            }
-
-            if (id.startsWith('place:back:')) {
-                const [, , gid, ownerId] = id.split(':');
-
-                if (interaction.guildId !== gid) {
-                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-                }
-                if (userId !== ownerId) {
-                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-                }
-
-                const st = placeSearchState.get(k);
-                if (!st) {
-                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
-                }
-
-                if (st.mode === 'create') {
-                    return renderCreatePanel(interaction, guildId, userId, { update: true });
-                }
-
-                return renderEditPanel(interaction, guildId, userId, { update: true });
-            }
-
             if (id.startsWith('place:pick:')) {
                 const [, , gid, ownerId] = id.split(':');
 
@@ -5389,6 +5271,21 @@ client.on(Events.InteractionCreate, async interaction => {
 
                     const st = placeSearchState.get(k);
 
+                    const ref = mode === 'create'
+                        ? createPanelPromptRef.get(k)
+                        : editPanelPromptRef.get(k);
+
+                    const updated = await editPromptRef(ref, {
+                        content: '',
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+
+                    if (updated) {
+                        try { await interaction.deleteReply(); } catch { }
+                        return;
+                    }
+
                     await interaction.editReply({
                         content: '',
                         embeds: [buildPlaceSearchEmbed(st)],
@@ -5403,7 +5300,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 } catch (e) {
                     return interaction.editReply({
-                        content: `お店検索に失敗しました: ${e.message}`,
+                        content: `店検索に失敗しました: ${e.message}`,
                         embeds: [],
                         components: [],
                     });
