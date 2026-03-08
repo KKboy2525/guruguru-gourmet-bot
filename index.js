@@ -2402,16 +2402,17 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
                 }
 
+                const st = placeSearchState.get(k);
+
+                if (!st) {
+                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
+                }
+
                 if (!st.query) {
                     return interaction.reply({
                         ephemeral: true,
                         content: '検索語が見つかりません。もう一度お店検索してください',
                     });
-                }
-
-                const st = placeSearchState.get(k);
-                if (!st) {
-                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
                 }
 
                 if (!st.nextPageToken) {
