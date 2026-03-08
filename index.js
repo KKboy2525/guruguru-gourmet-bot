@@ -3246,12 +3246,18 @@ client.on(Events.InteractionCreate, async interaction => {
             const gid = parts[2];
             const ownerId = parts[3];
 
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
 
-            return mode === 'create'
-                ? renderCreatePanel(interaction, guildId, userId, { update: true })
-                : renderEditPanel(interaction, guildId, userId, { update: true });
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
+                components: tagEntryChoiceComponents(mode, gid, ownerId),
+            });
         }
 
         if (id.startsWith('create:setUrl:')) {
