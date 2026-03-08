@@ -3195,11 +3195,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await interaction.deferUpdate();
 
+            const dbCh = await getDbChannelForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+
             const post = {
-                id: 'TEMP',
+                id: '',
                 name: d.name.trim(),
                 visited: d.visited !== false,
-                rating: d.visited === false ? null : d.rating,
+                rating: d.visited === false ? null : Number(d.rating),
                 comment: d.comment ?? '',
                 url: d.url ?? '',
                 map_url: d.mapUrl ?? '',
@@ -3212,31 +3215,45 @@ client.on(Events.InteractionCreate, async interaction => {
                 updated_at: nowIso(),
             };
 
-            if (!post) {
-                return interaction.update({
-                    content: '',
-                    embeds: [homeEmbed()],
-                    components: homeComponents(),
-                });
-            }
-
-            const nav = getDetailNavState(guildId, userId, post.id);
-            const fromMine = nav?.fromMine ?? cameFromMine(k, post.id, mineState);
-            const forceHomeBack = nav?.forceHomeBack ?? false;
-
-            const { detail, components } = renderDetail(interaction, {
-                post,
-                guildId,
-                userId,
-                fromMine,
-                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-                forceHomeBack,
+            // いったん仮IDでembed生成して送信
+            const sent = await dbCh.send({
+                embeds: [buildPostEmbedForDb({ ...post, id: 'TEMP' })],
             });
 
-            return interaction.update({
+            // 本当のIDを設定
+            post.id = sent.id;
+
+            // 正しいIDでembedを更新
+            await sent.edit({
+                embeds: [buildPostEmbedForDb(post)],
+            });
+
+            // cacheへ保存
+            cache.set(post.id, post);
+
+            // 自分の記録一覧にも反映
+            const mine = mineState.get(k);
+            if (mine?.results) {
+                mine.results.unshift(post.id);
+                mineState.set(k, mine);
+            }
+
+            // 作成ドラフトは消す
+            draftRating.delete(k);
+            createPanelPromptRef.delete(k);
+
+            // 写真待ち状態へ
+            awaitingPhoto.set(k, {
+                postId: post.id,
+                channelId: interaction.channelId,
+                guildId,
+                backTo: 'home',
+            });
+
+            return interaction.editReply({
                 content: '',
-                embeds: [detail],
-                components,
+                embeds: [photoCreateWaitingEmbed(post.name)],
+                components: photoWaitingComponentsForCreate(guildId, userId),
             });
         }
 
