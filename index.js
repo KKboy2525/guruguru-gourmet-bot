@@ -5,6 +5,7 @@ import express from "express";
 import dotenv from 'dotenv';
 dotenv.config();
 
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 
@@ -47,6 +48,7 @@ console.log('ENV CHECK', {
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const DB_CHANNEL_NAME = (process.env.DB_CHANNEL_NAME || 'gourmet-db').toLowerCase();
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 
 console.log('TOKEN loaded?', !!TOKEN, 'DB_CHANNEL_NAME=', DB_CHANNEL_NAME);
 if (!TOKEN) throw new Error('DISCORD_TOKEN is required');
@@ -122,6 +124,17 @@ const createPanelPromptRef = new Map();
 // 編集パネル参照
 // key: guildId:userId -> { webhook, messageId }
 const editPanelPromptRef = new Map();
+
+// 店検索状態 key: guildId:userId
+// {
+//   mode: 'create'|'edit',
+//   query: string,
+//   results: [{ placeId, name, address, mapUrl }],
+//   page: number,
+//   nextPageToken: string,
+//   loadingMore: boolean,
+// }
+const placeSearchState = new Map();
 
 // ====== util ======
 function nowIso() {
@@ -809,6 +822,179 @@ function tagSlice(cache, page = 0) {
     };
 }
 
+const PLACE_PAGE_SIZE = 25;
+
+function placeSlice(results = [], page = 0) {
+    const totalPages = Math.max(1, Math.ceil((results?.length || 0) / PLACE_PAGE_SIZE));
+    const p = Math.max(0, Math.min(totalPages - 1, Number(page) || 0));
+    const start = p * PLACE_PAGE_SIZE;
+
+    return {
+        p,
+        totalPages,
+        slice: (results ?? []).slice(start, start + PLACE_PAGE_SIZE),
+    };
+}
+
+async function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function searchGooglePlacesText(query, pageToken = '') {
+    if (!GOOGLE_MAPS_API_KEY) {
+        throw new Error('GOOGLE_MAPS_API_KEY が設定されていません');
+    }
+
+    const body = pageToken
+        ? { pageToken }
+        : {
+            textQuery: query,
+            languageCode: 'ja',
+            regionCode: 'JP',
+        };
+
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.googleMapsUri,nextPageToken',
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Google Places検索に失敗しました: ${res.status} ${text}`);
+    }
+
+    const json = await res.json();
+
+    return {
+        results: (json.places ?? []).map(p => ({
+            placeId: p.id ?? '',
+            name: p.displayName?.text ?? '',
+            address: p.formattedAddress ?? '',
+            mapUrl: p.googleMapsUri ?? '',
+        })).filter(x => x.name && x.mapUrl),
+        nextPageToken: json.nextPageToken ?? '',
+    };
+}
+
+async function fetchMoreGooglePlaces(query, nextPageToken) {
+    if (!nextPageToken) {
+        return { results: [], nextPageToken: '' };
+    }
+
+    // nextPageToken は少し待たないと無効なことがある
+    await sleep(2000);
+    return searchGooglePlacesText(query, nextPageToken);
+}
+
+function buildPlaceSearchModal(gid, ownerId, mode, currentValue = '') {
+    return new ModalBuilder()
+        .setCustomId(`modalPlaceSearch:${gid}:${ownerId}:${mode}`)
+        .setTitle('🍽 店を検索')
+        .addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('placeQuery')
+                    .setLabel('店名・地域など')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setPlaceholder('例: 一蘭 渋谷 / スシロー 浜松')
+                    .setValue(currentValue ?? '')
+            )
+        );
+}
+
+function placeSearchComponents(guildId, userId, st) {
+    const { p, totalPages, slice } = placeSlice(st.results ?? [], st.page ?? 0);
+
+    const options = slice.length
+        ? slice.map((x, i) => ({
+            label: (x.name || '(名称不明)').slice(0, 100),
+            description: (x.address || '住所なし').slice(0, 100),
+            value: String((p * PLACE_PAGE_SIZE) + i),
+        }))
+        : [{ label: '(候補なし)', description: '選択できません', value: 'none' }];
+
+    return [
+        new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId(`place:pick:${guildId}:${userId}`)
+                .setPlaceholder(`候補を選択してください ${p + 1}/${totalPages}`)
+                .setMinValues(1)
+                .setMaxValues(1)
+                .addOptions(options)
+        ),
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`place:prev:${guildId}:${userId}`)
+                .setLabel('◀ 前へ')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(p <= 0),
+
+            new ButtonBuilder()
+                .setCustomId(`place:next:${guildId}:${userId}`)
+                .setLabel('次へ ▶')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(p >= totalPages - 1),
+
+            new ButtonBuilder()
+                .setCustomId(`place:more:${guildId}:${userId}`)
+                .setLabel('さらに読み込む')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(!st?.nextPageToken || st?.loadingMore),
+
+            new ButtonBuilder()
+                .setCustomId(`place:back:${guildId}:${userId}`)
+                .setLabel('戻る')
+                .setStyle(ButtonStyle.Secondary),
+        ),
+    ];
+}
+
+function buildPlaceSearchEmbed(st = {}) {
+    const total = st?.results?.length || 0;
+    const query = st?.query || '';
+
+    return new EmbedBuilder()
+        .setTitle('🍽 店検索結果')
+        .setDescription(
+            `検索語: ${query ? `「${query}」` : '(なし)'}\n` +
+            `取得件数: ${total}件\n\n` +
+            '候補を選ぶと、お店の名前とGoogleMapリンクを自動入力します'
+        );
+}
+
+async function renderPlaceSearchPicker(interaction, guildId, userId, { update = true } = {}) {
+    const k = keyOf(guildId, userId);
+    const st = placeSearchState.get(k);
+
+    if (!st) {
+        return interaction.reply({
+            ephemeral: true,
+            content: '店検索状態がありません',
+        });
+    }
+
+    const payload = {
+        content: '',
+        embeds: [buildPlaceSearchEmbed(st)],
+        components: placeSearchComponents(guildId, userId, st),
+    };
+
+    if (update) {
+        return interaction.update(payload);
+    }
+
+    return interaction.reply({
+        ephemeral: true,
+        ...payload,
+    });
+}
+
 // ====== UI builders ======
 function flowStatusEmbed({ mode, step, postName = '', visited = null }) {
     const modeLabel = mode === 'edit' ? '✏ 編集中' : '➕ 記録作成中';
@@ -879,6 +1065,11 @@ function createPanelComponents(guildId, userId, d = {}) {
             .setStyle(ButtonStyle.Secondary),
 
         new ButtonBuilder()
+            .setCustomId(`create:searchPlace:${guildId}:${userId}`)
+            .setLabel('店を検索')
+            .setStyle(ButtonStyle.Primary),
+
+        new ButtonBuilder()
             .setCustomId(`create:setVisit:${guildId}:${userId}`)
             .setLabel('訪問状態')
             .setStyle(ButtonStyle.Secondary),
@@ -898,39 +1089,44 @@ function createPanelComponents(guildId, userId, d = {}) {
         );
     }
 
-    row1.push(
+    const row2 = [
         new ButtonBuilder()
             .setCustomId(`create:setPref:${guildId}:${userId}`)
             .setLabel('都道府県')
             .setStyle(ButtonStyle.Secondary),
-    );
+
+        new ButtonBuilder()
+            .setCustomId(`create:setComment:${guildId}:${userId}`)
+            .setLabel('コメント')
+            .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+            .setCustomId(`create:setTags:${guildId}:${userId}`)
+            .setLabel('タグ')
+            .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+            .setCustomId(`create:setUrl:${guildId}:${userId}`)
+            .setLabel('Webサイト')
+            .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+            .setCustomId(`create:setMap:${guildId}:${userId}`)
+            .setLabel('場所')
+            .setStyle(ButtonStyle.Secondary),
+    ];
 
     return [
         new ActionRowBuilder().addComponents(...row1),
 
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`create:setComment:${guildId}:${userId}`)
-                .setLabel('コメント')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`create:setTags:${guildId}:${userId}`)
-                .setLabel('タグ')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`create:setUrl:${guildId}:${userId}`)
-                .setLabel('Webサイト')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`create:setMap:${guildId}:${userId}`)
-                .setLabel('場所')
-                .setStyle(ButtonStyle.Secondary),
-        ),
+        new ActionRowBuilder().addComponents(...row2),
 
         new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`create:photos:${guildId}:${userId}`)
+                .setLabel('写真管理')
+                .setStyle(ButtonStyle.Secondary),
+
             new ButtonBuilder()
                 .setCustomId(`create:submit:${guildId}:${userId}`)
                 .setLabel('作成')
@@ -957,6 +1153,11 @@ function editPanelComponents(guildId, userId, d = {}) {
             .setStyle(ButtonStyle.Secondary),
 
         new ButtonBuilder()
+            .setCustomId(`edit:searchPlace:${guildId}:${userId}`)
+            .setLabel('店を検索')
+            .setStyle(ButtonStyle.Primary),
+
+        new ButtonBuilder()
             .setCustomId(`edit:setVisit:${guildId}:${userId}`)
             .setLabel('訪問状態')
             .setStyle(ButtonStyle.Secondary),
@@ -976,44 +1177,44 @@ function editPanelComponents(guildId, userId, d = {}) {
         );
     }
 
-    row1.push(
+    const row2 = [
         new ButtonBuilder()
             .setCustomId(`edit:setPref:${guildId}:${userId}`)
             .setLabel('都道府県')
             .setStyle(ButtonStyle.Secondary),
-    );
+
+        new ButtonBuilder()
+            .setCustomId(`edit:setComment:${guildId}:${userId}`)
+            .setLabel('コメント')
+            .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+            .setCustomId(`edit:setTags:${guildId}:${userId}`)
+            .setLabel('タグ')
+            .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+            .setCustomId(`edit:setUrl:${guildId}:${userId}`)
+            .setLabel('Webサイト')
+            .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+            .setCustomId(`edit:setMap:${guildId}:${userId}`)
+            .setLabel('場所')
+            .setStyle(ButtonStyle.Secondary),
+    ];
 
     return [
         new ActionRowBuilder().addComponents(...row1),
 
+        new ActionRowBuilder().addComponents(...row2),
+
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`edit:setComment:${guildId}:${userId}`)
-                .setLabel('コメント')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`edit:setTags:${guildId}:${userId}`)
-                .setLabel('タグ')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`edit:setUrl:${guildId}:${userId}`)
-                .setLabel('Webサイト')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`edit:setMap:${guildId}:${userId}`)
-                .setLabel('場所')
-                .setStyle(ButtonStyle.Secondary),
-
             new ButtonBuilder()
                 .setCustomId(`edit:photos:${guildId}:${userId}`)
                 .setLabel('写真管理')
                 .setStyle(ButtonStyle.Secondary),
-        ),
 
-        new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId(`edit:submit:${guildId}:${userId}`)
                 .setLabel('更新')
@@ -3078,6 +3279,154 @@ client.on(Events.InteractionCreate, async interaction => {
             return;
         }
 
+        if (id.startsWith('create:searchPlace:') || id.startsWith('edit:searchPlace:')) {
+            const parts = id.split(':');
+            const mode = parts[0];
+            const gid = parts[2];
+            const ownerId = parts[3];
+
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== mode) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                });
+            }
+
+            placeSearchState.set(k, {
+                mode,
+                query: d.name ?? '',
+                results: [],
+                page: 0,
+                nextPageToken: '',
+                loadingMore: false,
+            });
+
+            return interaction.showModal(
+                buildPlaceSearchModal(gid, ownerId, mode, d.name ?? '')
+            );
+        }
+
+        if (id.startsWith('place:prev:') || id.startsWith('place:next:')) {
+            const [, action, gid, ownerId] = id.split(':');
+
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const st = placeSearchState.get(k);
+            if (!st) {
+                return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+            }
+
+            const maxPage = Math.max(0, Math.ceil((st.results?.length || 0) / PLACE_PAGE_SIZE) - 1);
+            st.page = Number(st.page) || 0;
+            st.page += action === 'prev' ? -1 : 1;
+            if (st.page < 0) st.page = 0;
+            if (st.page > maxPage) st.page = maxPage;
+
+            placeSearchState.set(k, st);
+
+            return renderPlaceSearchPicker(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('place:more:')) {
+            const [, , gid, ownerId] = id.split(':');
+
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const st = placeSearchState.get(k);
+            if (!st) {
+                return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+            }
+
+            if (!st.nextPageToken) {
+                return interaction.reply({ ephemeral: true, content: 'これ以上候補がありません' });
+            }
+
+            st.loadingMore = true;
+            placeSearchState.set(k, st);
+
+            await interaction.update({
+                content: '',
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('🍽 店検索結果')
+                        .setDescription('追加の候補を読み込み中です...')
+                ],
+                components: [],
+            });
+
+            try {
+                const more = await fetchMoreGooglePlaces(st.query, st.nextPageToken);
+
+                const exists = new Set((st.results ?? []).map(x => x.placeId));
+                for (const item of more.results) {
+                    if (!exists.has(item.placeId)) {
+                        st.results.push(item);
+                        exists.add(item.placeId);
+                    }
+                }
+
+                st.nextPageToken = more.nextPageToken ?? '';
+                st.loadingMore = false;
+
+                placeSearchState.set(k, st);
+
+                return interaction.editReply({
+                    content: '',
+                    embeds: [buildPlaceSearchEmbed(st)],
+                    components: placeSearchComponents(guildId, userId, st),
+                });
+            } catch (e) {
+                st.loadingMore = false;
+                placeSearchState.set(k, st);
+
+                return interaction.editReply({
+                    content: `追加読込に失敗しました: ${e.message}`,
+                    embeds: [buildPlaceSearchEmbed(st)],
+                    components: placeSearchComponents(guildId, userId, st),
+                });
+            }
+        }
+
+        if (id.startsWith('place:back:')) {
+            const [, , gid, ownerId] = id.split(':');
+
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const st = placeSearchState.get(k);
+            if (!st) {
+                return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+            }
+
+            if (st.mode === 'create') {
+                return renderCreatePanel(interaction, guildId, userId, { update: true });
+            }
+
+            return renderEditPanel(interaction, guildId, userId, { update: true });
+        }
+
         if (id.startsWith('create:setName:')) {
             const [, , gid, ownerId] = id.split(':');
             if (interaction.guildId !== gid) {
@@ -3861,6 +4210,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -4749,6 +5099,261 @@ client.on(Events.InteractionCreate, async interaction => {
         // String select menu (mine list pick)
         if (interaction.isStringSelectMenu()) {
             const id = interaction.customId;
+            if (id.startsWith('create:searchPlace:') || id.startsWith('edit:searchPlace:')) {
+                const parts = id.split(':');
+                const mode = parts[0];
+                const gid = parts[2];
+                const ownerId = parts[3];
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                    });
+                }
+
+                placeSearchState.set(k, {
+                    mode,
+                    query: d.name ?? '',
+                    results: [],
+                    page: 0,
+                    nextPageToken: '',
+                    loadingMore: false,
+                });
+
+                return interaction.showModal(
+                    buildPlaceSearchModal(gid, ownerId, mode, d.name ?? '')
+                );
+            }
+
+            if (id.startsWith('place:prev:') || id.startsWith('place:next:')) {
+                const [, action, gid, ownerId] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const st = placeSearchState.get(k);
+                if (!st) {
+                    return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+                }
+
+                const maxPage = Math.max(0, Math.ceil((st.results?.length || 0) / PLACE_PAGE_SIZE) - 1);
+                st.page = Number(st.page) || 0;
+                st.page += action === 'prev' ? -1 : 1;
+                if (st.page < 0) st.page = 0;
+                if (st.page > maxPage) st.page = maxPage;
+
+                placeSearchState.set(k, st);
+
+                return renderPlaceSearchPicker(interaction, guildId, userId, { update: true });
+            }
+
+            if (id.startsWith('place:more:')) {
+                const [, , gid, ownerId] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const st = placeSearchState.get(k);
+                if (!st) {
+                    return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+                }
+
+                if (!st.nextPageToken) {
+                    return interaction.reply({ ephemeral: true, content: 'これ以上候補がありません' });
+                }
+
+                st.loadingMore = true;
+                placeSearchState.set(k, st);
+
+                await interaction.update({
+                    content: '',
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('🍽 店検索結果')
+                            .setDescription('追加の候補を読み込み中です...')
+                    ],
+                    components: [],
+                });
+
+                try {
+                    const more = await fetchMoreGooglePlaces(st.query, st.nextPageToken);
+
+                    const exists = new Set((st.results ?? []).map(x => x.placeId));
+                    for (const item of more.results) {
+                        if (!exists.has(item.placeId)) {
+                            st.results.push(item);
+                            exists.add(item.placeId);
+                        }
+                    }
+
+                    st.nextPageToken = more.nextPageToken ?? '';
+                    st.loadingMore = false;
+
+                    placeSearchState.set(k, st);
+
+                    return interaction.editReply({
+                        content: '',
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+                } catch (e) {
+                    st.loadingMore = false;
+                    placeSearchState.set(k, st);
+
+                    return interaction.editReply({
+                        content: `追加読込に失敗しました: ${e.message}`,
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+                }
+            }
+
+            if (id.startsWith('place:back:')) {
+                const [, , gid, ownerId] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const st = placeSearchState.get(k);
+                if (!st) {
+                    return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+                }
+
+                if (st.mode === 'create') {
+                    return renderCreatePanel(interaction, guildId, userId, { update: true });
+                }
+
+                return renderEditPanel(interaction, guildId, userId, { update: true });
+            }
+
+            if (id.startsWith('place:pick:')) {
+                const [, , gid, ownerId] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const picked = interaction.values?.[0];
+                if (!picked || picked === 'none') {
+                    return interaction.reply({ ephemeral: true, content: '候補を選択してください' });
+                }
+
+                const st = placeSearchState.get(k);
+                if (!st) {
+                    return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+                }
+
+                const idx = Number(picked);
+                const selected = st.results?.[idx];
+
+                if (!selected) {
+                    return interaction.reply({ ephemeral: true, content: '候補が見つかりません' });
+                }
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== st.mode) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: st.mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                    });
+                }
+
+                d.name = selected.name || d.name || '';
+                d.mapUrl = selected.mapUrl || d.mapUrl || '';
+                draftRating.set(k, d);
+                placeSearchState.delete(k);
+
+                if (st.mode === 'create') {
+                    return renderCreatePanel(interaction, guildId, userId, { update: true });
+                }
+
+                return renderEditPanel(interaction, guildId, userId, { update: true });
+            }
+
+            if (id.startsWith('modalPlaceSearch:')) {
+                const [, gid, ownerId, mode] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                    });
+                }
+
+                const query = interaction.fields.getTextInputValue('placeQuery')?.trim() ?? '';
+                if (!query) {
+                    return interaction.reply({ ephemeral: true, content: '検索語を入力してください' });
+                }
+
+                await interaction.deferReply({ ephemeral: true });
+
+                try {
+                    const first = await searchGooglePlacesText(query);
+
+                    placeSearchState.set(k, {
+                        mode,
+                        query,
+                        results: first.results ?? [],
+                        page: 0,
+                        nextPageToken: first.nextPageToken ?? '',
+                        loadingMore: false,
+                    });
+
+                    const st = placeSearchState.get(k);
+
+                    await interaction.editReply({
+                        content: '',
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+
+                    const sent = await interaction.fetchReply().catch(() => null);
+                    if (sent?.id) {
+                        addUiMessageId(guildId, userId, sent.id);
+                    }
+
+                    return;
+                } catch (e) {
+                    return interaction.editReply({
+                        content: `店検索に失敗しました: ${e.message}`,
+                        embeds: [],
+                        components: [],
+                    });
+                }
+            }
+
             // ===== 検索：都道府県ピック =====
             if (id.startsWith('search:prefPick:')) {
                 const parts = id.split(':');
