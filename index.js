@@ -2,15 +2,18 @@
 // package.json に "type": "module" がある前提
 
 import express from "express";
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
+
 dotenv.config();
 
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
-
 app.get('/', (_req, res) => {
-    res.status(200).send('ok');
+    return res.status(200).send('ok');
+});
+
+app.get('/healthcheck', (_req, res) => {
+    return res.status(200).send('ok');
 });
 
 app.listen(PORT, '0.0.0.0', () => {
@@ -3314,119 +3317,6 @@ client.on(Events.InteractionCreate, async interaction => {
             );
         }
 
-        if (id.startsWith('place:prev:') || id.startsWith('place:next:')) {
-            const [, action, gid, ownerId] = id.split(':');
-
-            if (interaction.guildId !== gid) {
-                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            }
-            if (userId !== ownerId) {
-                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-            }
-
-            const st = placeSearchState.get(k);
-            if (!st) {
-                return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
-            }
-
-            const maxPage = Math.max(0, Math.ceil((st.results?.length || 0) / PLACE_PAGE_SIZE) - 1);
-            st.page = Number(st.page) || 0;
-            st.page += action === 'prev' ? -1 : 1;
-            if (st.page < 0) st.page = 0;
-            if (st.page > maxPage) st.page = maxPage;
-
-            placeSearchState.set(k, st);
-
-            return renderPlaceSearchPicker(interaction, guildId, userId, { update: true });
-        }
-
-        if (id.startsWith('place:more:')) {
-            const [, , gid, ownerId] = id.split(':');
-
-            if (interaction.guildId !== gid) {
-                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            }
-            if (userId !== ownerId) {
-                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-            }
-
-            const st = placeSearchState.get(k);
-            if (!st) {
-                return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
-            }
-
-            if (!st.nextPageToken) {
-                return interaction.reply({ ephemeral: true, content: 'これ以上候補がありません' });
-            }
-
-            st.loadingMore = true;
-            placeSearchState.set(k, st);
-
-            await interaction.update({
-                content: '',
-                embeds: [
-                    new EmbedBuilder()
-                        .setTitle('🍽 店検索結果')
-                        .setDescription('追加の候補を読み込み中です...')
-                ],
-                components: [],
-            });
-
-            try {
-                const more = await fetchMoreGooglePlaces(st.query, st.nextPageToken);
-
-                const exists = new Set((st.results ?? []).map(x => x.placeId));
-                for (const item of more.results) {
-                    if (!exists.has(item.placeId)) {
-                        st.results.push(item);
-                        exists.add(item.placeId);
-                    }
-                }
-
-                st.nextPageToken = more.nextPageToken ?? '';
-                st.loadingMore = false;
-
-                placeSearchState.set(k, st);
-
-                return interaction.editReply({
-                    content: '',
-                    embeds: [buildPlaceSearchEmbed(st)],
-                    components: placeSearchComponents(guildId, userId, st),
-                });
-            } catch (e) {
-                st.loadingMore = false;
-                placeSearchState.set(k, st);
-
-                return interaction.editReply({
-                    content: `追加読込に失敗しました: ${e.message}`,
-                    embeds: [buildPlaceSearchEmbed(st)],
-                    components: placeSearchComponents(guildId, userId, st),
-                });
-            }
-        }
-
-        if (id.startsWith('place:back:')) {
-            const [, , gid, ownerId] = id.split(':');
-
-            if (interaction.guildId !== gid) {
-                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            }
-            if (userId !== ownerId) {
-                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-            }
-
-            const st = placeSearchState.get(k);
-            if (!st) {
-                return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
-            }
-
-            if (st.mode === 'create') {
-                return renderCreatePanel(interaction, guildId, userId, { update: true });
-            }
-
-            return renderEditPanel(interaction, guildId, userId, { update: true });
-        }
-
         if (id.startsWith('create:setName:')) {
             const [, , gid, ownerId] = id.split(':');
             if (interaction.guildId !== gid) {
@@ -5294,66 +5184,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 return renderEditPanel(interaction, guildId, userId, { update: true });
             }
 
-            if (id.startsWith('modalPlaceSearch:')) {
-                const [, gid, ownerId, mode] = id.split(':');
-
-                if (interaction.guildId !== gid) {
-                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-                }
-                if (userId !== ownerId) {
-                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-                }
-
-                const d = draftRating.get(k);
-                if (!d || d.mode !== mode) {
-                    return interaction.reply({
-                        ephemeral: true,
-                        content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
-                    });
-                }
-
-                const query = interaction.fields.getTextInputValue('placeQuery')?.trim() ?? '';
-                if (!query) {
-                    return interaction.reply({ ephemeral: true, content: '検索語を入力してください' });
-                }
-
-                await interaction.deferReply({ ephemeral: true });
-
-                try {
-                    const first = await searchGooglePlacesText(query);
-
-                    placeSearchState.set(k, {
-                        mode,
-                        query,
-                        results: first.results ?? [],
-                        page: 0,
-                        nextPageToken: first.nextPageToken ?? '',
-                        loadingMore: false,
-                    });
-
-                    const st = placeSearchState.get(k);
-
-                    await interaction.editReply({
-                        content: '',
-                        embeds: [buildPlaceSearchEmbed(st)],
-                        components: placeSearchComponents(guildId, userId, st),
-                    });
-
-                    const sent = await interaction.fetchReply().catch(() => null);
-                    if (sent?.id) {
-                        addUiMessageId(guildId, userId, sent.id);
-                    }
-
-                    return;
-                } catch (e) {
-                    return interaction.editReply({
-                        content: `店検索に失敗しました: ${e.message}`,
-                        embeds: [],
-                        components: [],
-                    });
-                }
-            }
-
             // ===== 検索：都道府県ピック =====
             if (id.startsWith('search:prefPick:')) {
                 const parts = id.split(':');
@@ -5505,6 +5335,66 @@ client.on(Events.InteractionCreate, async interaction => {
         // Modal submit
         if (interaction.isModalSubmit()) {
             const id = interaction.customId;
+
+            if (id.startsWith('modalPlaceSearch:')) {
+                const [, gid, ownerId, mode] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                    });
+                }
+
+                const query = interaction.fields.getTextInputValue('placeQuery')?.trim() ?? '';
+                if (!query) {
+                    return interaction.reply({ ephemeral: true, content: '検索語を入力してください' });
+                }
+
+                await interaction.deferReply({ ephemeral: true });
+
+                try {
+                    const first = await searchGooglePlacesText(query);
+
+                    placeSearchState.set(k, {
+                        mode,
+                        query,
+                        results: first.results ?? [],
+                        page: 0,
+                        nextPageToken: first.nextPageToken ?? '',
+                        loadingMore: false,
+                    });
+
+                    const st = placeSearchState.get(k);
+
+                    await interaction.editReply({
+                        content: '',
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+
+                    const sent = await interaction.fetchReply().catch(() => null);
+                    if (sent?.id) {
+                        addUiMessageId(guildId, userId, sent.id);
+                    }
+
+                    return;
+                } catch (e) {
+                    return interaction.editReply({
+                        content: `店検索に失敗しました: ${e.message}`,
+                        embeds: [],
+                        components: [],
+                    });
+                }
+            }
 
             if (id.startsWith('modalCreateComment:')) {
                 const [, gid, ownerId] = id.split(':');
