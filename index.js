@@ -1958,6 +1958,7 @@ async function renderSearchResultList(interaction, guildId, userId, { update = f
         const panel = searchState.get(k) ?? {
             userIdFilter: null,
             prefectureFilters: [],
+            tagFilters: [],
             keyword: '',
             ratingFilters: [],
             results: [],
@@ -2590,6 +2591,59 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         }
 
+        if (id.startsWith('search:tagPick:')) {
+            const parts = id.split(':');
+            const gid = parts[2];
+            const ownerId = parts[3];
+            const page = Number(parts[4] || 0);
+
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const picked = interaction.values ?? [];
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+
+            const { slice } = tagSlice(cache, page);
+            const current = new Set(st.tagFilters ?? []);
+
+            // 今のページにあるタグはいったん外す
+            for (const tag of slice) {
+                current.delete(tag);
+            }
+
+            // 今回選んだタグを追加
+            for (const tag of picked) {
+                current.add(tag);
+            }
+
+            st.tagFilters = [...current];
+            searchState.set(k, st);
+
+            return interaction.update({
+                content: st.tagFilters.length
+                    ? `タグを設定しました: ${st.tagFilters.map(x => `#${x}`).join(' / ')}`
+                    : 'タグを解除しました',
+                embeds: [searchPanelEmbed(st)],
+                components: searchPanelComponents(guildId, userId, st),
+            });
+        }
+
         if (id.startsWith('confirm:')) {
             const [, answer, kind, gid, ownerId, postId, extra] = id.split(':');
 
@@ -2920,6 +2974,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -2980,6 +3035,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -3856,6 +3912,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -3903,6 +3960,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -3927,6 +3985,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -3975,6 +4034,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -4071,7 +4131,15 @@ client.on(Events.InteractionCreate, async interaction => {
             if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-            const st = { userIdFilter: null, prefectureFilters: [], keyword: '', ratingFilters: [], results: [], page: 0 };
+            const st = {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
             searchState.set(k, st);
             return interaction.update({ embeds: [searchPanelEmbed(st)], components: searchPanelComponents(guildId, userId, st) });
         }
@@ -4097,6 +4165,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -4119,6 +4188,20 @@ client.on(Events.InteractionCreate, async interaction => {
                     if (st.prefectureFilters?.length) {
                         const pp = (p.prefecture ?? '').trim();
                         if (!st.prefectureFilters.includes(pp)) return false;
+                    }
+
+                    if (st.tagFilters?.length) {
+                        const tags = (p.tags ?? []).map(x =>
+                            String(x ?? '').normalize('NFKC').toLowerCase().trim()
+                        );
+
+                        const selectedTags = st.tagFilters.map(x =>
+                            String(x ?? '').normalize('NFKC').toLowerCase().trim()
+                        );
+
+                        for (const tag of selectedTags) {
+                            if (!tags.includes(tag)) return false;
+                        }
                     }
 
                     if (keywords.length) {
@@ -4172,6 +4255,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -4417,6 +4501,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -4683,6 +4768,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const st = searchState.get(k) ?? {
                     userIdFilter: null,
                     prefectureFilters: [],
+                    tagFilters: [],
                     keyword: '',
                     ratingFilters: [],
                     results: [],
@@ -5325,6 +5411,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const st = searchState.get(k) ?? {
                     userIdFilter: null,
                     prefectureFilters: [],
+                    tagFilters: [],
                     keyword: '',
                     ratingFilters: [],
                     results: [],
