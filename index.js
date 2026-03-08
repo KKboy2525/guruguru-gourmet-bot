@@ -85,7 +85,7 @@ const uiMessages = new Map();
 const detailPhotoView = new Map();
 
 // 検索状態 key: guildId:userId
-// { userIdFilter?:string[]|null, prefectureFilters?:string[], keyword?:string, results?:string[], page?:number, ratingFilters?:number[] }
+// { userIdFilter?:string[]|null, prefectureFilters?:string[], tagFilters?:string[], keyword?:string, results?:string[], page?:number, ratingFilters?:number[] }
 const searchState = new Map();
 
 // 自分の記録（カード一覧）状態 key: guildId:userId
@@ -665,6 +665,43 @@ function prefSlice(page = 0) {
     return { p, totalPages, slice: PREFS.slice(start, start + PREF_PAGE_SIZE) };
 }
 
+const TAG_PAGE_SIZE = 25;
+
+function getAllTagsFromCache(cache) {
+    const seen = new Set();
+    const out = [];
+
+    for (const post of cache.values()) {
+        for (const tag of (post.tags ?? [])) {
+            const t = String(tag ?? '').trim();
+            if (!t) continue;
+
+            const key = t.toLowerCase();
+            if (seen.has(key)) continue;
+
+            seen.add(key);
+            out.push(t);
+        }
+    }
+
+    out.sort((a, b) => a.localeCompare(b, 'ja'));
+    return out;
+}
+
+function tagSlice(cache, page = 0) {
+    const tags = getAllTagsFromCache(cache);
+    const totalPages = Math.max(1, Math.ceil(tags.length / TAG_PAGE_SIZE));
+    const p = Math.max(0, Math.min(totalPages - 1, Number(page) || 0));
+    const start = p * TAG_PAGE_SIZE;
+
+    return {
+        p,
+        totalPages,
+        slice: tags.slice(start, start + TAG_PAGE_SIZE),
+        all: tags,
+    };
+}
+
 // ====== UI builders ======
 function flowStatusEmbed({ mode, step, postName = '', visited = null }) {
     const modeLabel = mode === 'edit' ? '✏ 編集中' : '➕ 記録作成中';
@@ -678,39 +715,53 @@ function flowStatusEmbed({ mode, step, postName = '', visited = null }) {
 }
 
 function buildCreatePanelEmbed(d = {}) {
+    const lines = [
+        `🍽 お店の名前: ${d.name?.trim() ? d.name : '(未入力)'}`,
+        `✅ 訪問状態: ${d.visited == null ? '未選択' : (d.visited ? '行った' : '行きたい')}`,
+        ...(d.visited === true
+            ? [`⭐ 評価: ${d.rating ? stars(d.rating) : '未選択（必須）'}`]
+            : []),
+        `💬 コメント: ${d.comment?.trim() ? d.comment : '(なし)'}`,
+        `🗾 都道府県: ${d.prefecture || '(未設定)'}`,
+        ...(d.visited === true
+            ? [`📅 行った日付: ${d.visitedDate || '(未入力)'}`]
+            : []),
+        `🏷 タグ: ${d.tags?.length ? tagString(d.tags) : '(なし)'}`,
+        `🔗 Webサイト: ${d.url || '(なし)'}`,
+        `📍 場所: ${d.mapUrl || '(なし)'}`,
+        `📷 写真: 登録後に追加`,
+        '',
+        '項目を好きな順番で入力して「作成」を押してください',
+    ];
+
     return new EmbedBuilder()
         .setTitle('➕ 記録作成中')
-        .setDescription(
-            `🍽 お店の名前: ${d.name?.trim() ? d.name : '(未入力)'}\n` +
-            `✅ 訪問状態: ${d.visited == null ? '未選択' : (d.visited ? '行った' : '行きたい')}\n` +
-            `⭐ 評価: ${d.visited === false ? '不要' : (d.rating ? stars(d.rating) : '未選択（必須）')}\n` +
-            `💬 コメント: ${d.comment?.trim() ? d.comment : '(なし)'}\n` +
-            `🗾 都道府県: ${d.prefecture || '(未設定)'}\n` +
-            `📅 行った日付: ${d.visited === false ? '不要' : (d.visitedDate || '(未入力)')}\n` +
-            `🏷 タグ: ${d.tags?.length ? tagString(d.tags) : '(なし)'}\n` +
-            `🔗 Webサイト: ${d.url || '(なし)'}\n` +
-            `📍 場所: ${d.mapUrl || '(なし)'}\n` +
-            `📷 写真: 登録後に追加\n\n` +
-            `項目を好きな順番で入力して「作成」を押してください`
-        );
+        .setDescription(lines.join('\n'));
 }
 
 function buildEditPanelEmbed(d = {}) {
+    const lines = [
+        `🍽 お店の名前: ${d.name?.trim() ? d.name : '(未入力)'}`,
+        `✅ 訪問状態: ${d.visited == null ? '未選択' : (d.visited ? '行った' : '行きたい')}`,
+        ...(d.visited === true
+            ? [`⭐ 評価: ${d.rating ? stars(d.rating) : '未選択（必須）'}`]
+            : []),
+        `💬 コメント: ${d.comment?.trim() ? d.comment : '(なし)'}`,
+        `🗾 都道府県: ${d.prefecture || '(未設定)'}`,
+        ...(d.visited === true
+            ? [`📅 行った日付: ${d.visitedDate || '(未入力)'}`]
+            : []),
+        `🏷 タグ: ${d.tags?.length ? tagString(d.tags) : '(なし)'}`,
+        `🔗 Webサイト: ${d.url || '(なし)'}`,
+        `📍 場所: ${d.mapUrl || '(なし)'}`,
+        `📷 写真: 写真管理から編集`,
+        '',
+        '項目を好きな順番で編集して「更新」を押してください',
+    ];
+
     return new EmbedBuilder()
         .setTitle(`✏ 編集中${d.name ? `: ${d.name}` : ''}`)
-        .setDescription(
-            `🍽 お店の名前: ${d.name?.trim() ? d.name : '(未入力)'}\n` +
-            `✅ 訪問状態: ${d.visited == null ? '未選択' : (d.visited ? '行った' : '行きたい')}\n` +
-            `⭐ 評価: ${d.visited === false ? '不要' : (d.rating ? stars(d.rating) : '未選択（必須）')}\n` +
-            `💬 コメント: ${d.comment?.trim() ? d.comment : '(なし)'}\n` +
-            `🗾 都道府県: ${d.prefecture || '(未設定)'}\n` +
-            `📅 行った日付: ${d.visited === false ? '不要' : (d.visitedDate || '(未入力)')}\n` +
-            `🏷 タグ: ${d.tags?.length ? tagString(d.tags) : '(なし)'}\n` +
-            `🔗 Webサイト: ${d.url || '(なし)'}\n` +
-            `📍 場所: ${d.mapUrl || '(なし)'}\n` +
-            `📷 写真: 写真管理から編集\n\n` +
-            '項目を好きな順番で編集して「更新」を押してください'
-        );
+        .setDescription(lines.join('\n'));
 }
 
 function createPanelComponents(guildId, userId, d = {}) {
@@ -789,13 +840,8 @@ function createPanelComponents(guildId, userId, d = {}) {
                 .setStyle(ButtonStyle.Secondary),
 
             new ButtonBuilder()
-                .setCustomId(`create:cancel:${guildId}:${userId}`)
-                .setLabel('中断')
-                .setStyle(ButtonStyle.Danger),
-
-            new ButtonBuilder()
-                .setCustomId(`create:back:${guildId}:${userId}`)
-                .setLabel('戻る')
+                .setCustomId(`create:home:${guildId}:${userId}`)
+                .setLabel('🏠 ホーム')
                 .setStyle(ButtonStyle.Secondary),
         ),
     ];
@@ -1115,11 +1161,6 @@ function photoWaitingComponentsForCreate(guildId, userId) {
 
 function buildVisitedDateModal(gid, ownerId, mode, postId = '', currentValue = '') {
 
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-
     const todayStr = todayYMD();
 
     return new ModalBuilder()
@@ -1314,21 +1355,6 @@ function homeComponents() {
     ];
 }
 
-function cancelRow(guildId, userId) {
-    return [
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`cancel:flow:${guildId}:${userId}`)
-                .setLabel('✖ 中断')
-                .setStyle(ButtonStyle.Danger)
-        ),
-    ];
-}
-
-function withCancelRows(rows, guildId, userId) {
-    return [...rows, ...cancelRow(guildId, userId)];
-}
-
 function visitRow(prefix, guildId, userId, postId = '') {
     return [
         new ActionRowBuilder().addComponents(
@@ -1395,6 +1421,11 @@ function searchPanelEmbed(state) {
     const prefLabel = state.prefectureFilters?.length
         ? state.prefectureFilters.map(x => `#${x}`).join(' ')
         : '指定なし';
+
+    const tagLabel = state.tagFilters?.length
+        ? state.tagFilters.map(x => `#${x}`).join(' ')
+        : '指定なし';
+
     const keywordLabel = state.keyword ? `「${state.keyword}」` : '指定なし';
     const ratingLabel = state.ratingFilters?.length
         ? state.ratingFilters.map(r => `⭐${r}`).join(' ')
@@ -1405,6 +1436,7 @@ function searchPanelEmbed(state) {
         .setDescription(
             `👤 登録者: ${userLabel}\n` +
             `🗾 都道府県: ${prefLabel}\n` +
+            `🏷 タグ: ${tagLabel}\n` +
             `🔤 キーワード: ${keywordLabel}\n` +
             `⭐ 評価: ${ratingLabel}\n\n` +
             '条件を設定して「検索実行」を押してください'
@@ -1422,6 +1454,11 @@ function searchPanelComponents(guildId, userId, st = {}) {
             new ButtonBuilder()
                 .setCustomId(`search:setPref:${guildId}:${userId}`)
                 .setLabel('🗾 都道府県')
+                .setStyle(ButtonStyle.Secondary),
+
+            new ButtonBuilder()
+                .setCustomId(`search:setTag:${guildId}:${userId}`)
+                .setLabel('🏷 タグ')
                 .setStyle(ButtonStyle.Secondary),
 
             new ButtonBuilder()
@@ -2022,6 +2059,274 @@ client.on(Events.InteractionCreate, async interaction => {
                 searchState.set(k, st);
 
                 return renderSearchResultList(interaction, guildId, userId, { update: true });
+            }
+
+            if (id.startsWith('search:setTag:')) {
+                const [, , gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                await ensureCacheLoadedForGuild(interaction.guild);
+                const cache = getGuildCache(guildId);
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0
+                };
+
+                const { p, totalPages, slice } = tagSlice(cache, 0);
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`search:tagPick:${guildId}:${ownerId}:${p}`)
+                    .setPlaceholder(`タグを選択してください（複数可） ${p + 1}/${totalPages}`)
+                    .setMinValues(0)
+                    .setMaxValues(slice.length || 1)
+                    .addOptions(
+                        (slice.length ? slice : ['(タグなし)']).map(x => ({
+                            label: x,
+                            value: x,
+                            default: st.tagFilters?.includes(x) ?? false,
+                        }))
+                    );
+
+                const nav = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPagePrev:${guildId}:${ownerId}:${p}`)
+                        .setLabel('◀ 前へ')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(p <= 0),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPageNext:${guildId}:${ownerId}:${p}`)
+                        .setLabel('次へ ▶')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(p >= totalPages - 1),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPageClear:${guildId}:${ownerId}`)
+                        .setLabel('解除')
+                        .setStyle(ButtonStyle.Secondary),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagBack:${guildId}:${ownerId}`)
+                        .setLabel('戻る')
+                        .setStyle(ButtonStyle.Secondary),
+                );
+
+                return interaction.update({
+                    content: 'タグを選択してください',
+                    embeds: [],
+                    components: [new ActionRowBuilder().addComponents(select), nav],
+                });
+            }
+
+            if (id.startsWith('search:tagPagePrev:') || id.startsWith('search:tagPageNext:')) {
+                const parts = id.split(':');
+                const gid = parts[2];
+                const ownerId = parts[3];
+                const page = Number(parts[4] || 0);
+
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                await ensureCacheLoadedForGuild(interaction.guild);
+                const cache = getGuildCache(guildId);
+
+                const next = id.includes('tagPageNext') ? page + 1 : page - 1;
+                const { p, totalPages, slice } = tagSlice(cache, next);
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0
+                };
+
+                if (!slice.length) {
+                    return interaction.update({
+                        content: '',
+                        embeds: [searchPanelEmbed(st)],
+                        components: searchPanelComponents(guildId, userId, st),
+                    });
+                }
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`search:tagPick:${guildId}:${ownerId}:${p}`)
+                    .setPlaceholder(`タグを選択してください（複数可） ${p + 1}/${totalPages}`)
+                    .setMinValues(0)
+                    .setMaxValues(slice.length)
+                    .addOptions(
+                        slice.map(x => ({
+                            label: x,
+                            value: x,
+                            default: st.tagFilters?.includes(x) ?? false,
+                        }))
+                    );
+
+                const nav = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPagePrev:${guildId}:${ownerId}:${p}`)
+                        .setLabel('◀ 前へ')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(p <= 0),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPageNext:${guildId}:${ownerId}:${p}`)
+                        .setLabel('次へ ▶')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(p >= totalPages - 1),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPageClear:${guildId}:${ownerId}`)
+                        .setLabel('解除')
+                        .setStyle(ButtonStyle.Secondary),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagBack:${guildId}:${ownerId}`)
+                        .setLabel('戻る')
+                        .setStyle(ButtonStyle.Secondary),
+                );
+
+                return interaction.update({
+                    content: 'タグを選択してください',
+                    embeds: [],
+                    components: [new ActionRowBuilder().addComponents(select), nav],
+                });
+            }
+
+            if (id.startsWith('search:tagPagePrev:') || id.startsWith('search:tagPageNext:')) {
+                const parts = id.split(':');
+                const gid = parts[2];
+                const ownerId = parts[3];
+                const page = Number(parts[4] || 0);
+
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                await ensureCacheLoadedForGuild(interaction.guild);
+                const cache = getGuildCache(guildId);
+
+                const next = id.includes('tagPageNext') ? page + 1 : page - 1;
+                const { p, totalPages, slice } = tagSlice(cache, next);
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0
+                };
+
+                if (!slice.length) {
+                    return interaction.update({
+                        content: '',
+                        embeds: [searchPanelEmbed(st)],
+                        components: searchPanelComponents(guildId, userId, st),
+                    });
+                }
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`search:tagPick:${guildId}:${ownerId}:${p}`)
+                    .setPlaceholder(`タグを選択してください（複数可） ${p + 1}/${totalPages}`)
+                    .setMinValues(0)
+                    .setMaxValues(slice.length)
+                    .addOptions(
+                        slice.map(x => ({
+                            label: x,
+                            value: x,
+                            default: st.tagFilters?.includes(x) ?? false,
+                        }))
+                    );
+
+                const nav = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPagePrev:${guildId}:${ownerId}:${p}`)
+                        .setLabel('◀ 前へ')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(p <= 0),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPageNext:${guildId}:${ownerId}:${p}`)
+                        .setLabel('次へ ▶')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(p >= totalPages - 1),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagPageClear:${guildId}:${ownerId}`)
+                        .setLabel('解除')
+                        .setStyle(ButtonStyle.Secondary),
+
+                    new ButtonBuilder()
+                        .setCustomId(`search:tagBack:${guildId}:${ownerId}`)
+                        .setLabel('戻る')
+                        .setStyle(ButtonStyle.Secondary),
+                );
+
+                return interaction.update({
+                    content: 'タグを選択してください',
+                    embeds: [],
+                    components: [new ActionRowBuilder().addComponents(select), nav],
+                });
+            }
+
+            if (id.startsWith('search:tagPageClear:')) {
+                const parts = id.split(':');
+                const gid = parts[2];
+                const ownerId = parts[3];
+
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0
+                };
+
+                st.tagFilters = [];
+                searchState.set(k, st);
+
+                return interaction.update({
+                    content: 'タグフィルタを解除しました',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+            }
+
+            if (id.startsWith('search:tagBack:')) {
+                const [, , gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0
+                };
+
+                return interaction.update({
+                    content: '',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
             }
 
             if (id.startsWith('photo:skip:')) {
@@ -2825,7 +3130,7 @@ client.on(Events.InteractionCreate, async interaction => {
             return renderCreatePanel(interaction, guildId, userId, { update: true });
         }
 
-        if (id.startsWith('create:cancel:') || id.startsWith('create:back:')) {
+        if (id.startsWith('create:cancel:') || id.startsWith('create:home:')) {
             const [, action, gid, ownerId] = id.split(':');
             if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
@@ -2864,11 +3169,19 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
             }
 
-            // お店の名前必須チェック
+            // 店名必須
             if (!d.name || !d.name.trim()) {
                 return interaction.reply({
                     ephemeral: true,
                     content: 'お店の名前を入力してください'
+                });
+            }
+
+            // 訪問状態必須
+            if (d.visited == null) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: '訪問状態を選択してください'
                 });
             }
 
@@ -2898,63 +3211,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 created_at: nowIso(),
                 updated_at: nowIso(),
             };
-
-            await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
-
-            const dbCh = await getDbChannelForGuild(interaction.guild);
-            const sent = await dbCh.send({
-                embeds: [buildPostEmbedForDb({ ...post, id: '0' })]
-            });
-
-            post.id = sent.id;
-            await sent.edit({ embeds: [buildPostEmbedForDb(post)] });
-            cache.set(post.id, post);
-
-            draftRating.delete(k);
-            createPanelPromptRef.delete(k);
-
-            await interaction.editReply({
-                embeds: [photoCreateWaitingEmbed(post.name)],
-                components: photoWaitingComponentsForCreate(guildId, userId),
-            });
-
-            const replyMsg = await interaction.fetchReply().catch(() => null);
-            awaitingPhoto.set(k, {
-                postId: post.id,
-                channelId: interaction.channelId,
-                guildId,
-                backTo: 'home',
-                uiMessageRef: replyMsg?.id
-                    ? { webhook: interaction.webhook, messageId: replyMsg.id }
-                    : null,
-            });
-
-            return;
-        }
-
-        if (id.startsWith('edit:back:')) {
-            const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) {
-                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            }
-            if (userId !== ownerId) {
-                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-            }
-
-            const d = draftRating.get(k);
-
-            if (!d?.postId) {
-                return interaction.update({
-                    content: '',
-                    embeds: [homeEmbed()],
-                    components: homeComponents(),
-                });
-            }
-
-            await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
-            const post = cache.get(d.postId);
 
             if (!post) {
                 return interaction.update({
@@ -3406,9 +3662,9 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
-                tagFilters: [],
                 results: [],
                 page: 0
             };
@@ -3556,15 +3812,16 @@ client.on(Events.InteractionCreate, async interaction => {
                 results: [],
                 page: 0
             };
+
             const keywords = (st.keyword ?? '')
+                .normalize('NFKC')
                 .toLowerCase()
                 .trim()
-                .split(/\s+/)   // 半角スペース区切り
+                .split(/[ \u3000]+/)
                 .filter(Boolean);
 
             const results = [...cache.values()]
                 .filter(p => {
-
                     if (st.userIdFilter?.length) {
                         if (!st.userIdFilter.includes(p.created_by)) return false;
                     }
@@ -3575,7 +3832,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
 
                     if (keywords.length) {
-
                         const hay = [
                             p.name ?? '',
                             p.comment ?? '',
@@ -3583,9 +3839,9 @@ client.on(Events.InteractionCreate, async interaction => {
                             ...(p.tags ?? [])
                         ]
                             .join('\n')
+                            .normalize('NFKC')
                             .toLowerCase();
 
-                        // 全キーワード一致
                         for (const kw of keywords) {
                             if (!hay.includes(kw)) return false;
                         }
