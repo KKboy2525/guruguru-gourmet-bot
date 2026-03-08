@@ -928,11 +928,6 @@ function createPanelComponents(guildId, userId, d = {}) {
                 .setCustomId(`create:setMap:${guildId}:${userId}`)
                 .setLabel('場所')
                 .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`create:photos:${guildId}:${userId}`)
-                .setLabel('写真管理')
-                .setStyle(ButtonStyle.Secondary),
         ),
 
         new ActionRowBuilder().addComponents(
@@ -4191,16 +4186,16 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
 
                     if (st.tagFilters?.length) {
-                        const tags = (p.tags ?? []).map(x =>
-                            String(x ?? '').normalize('NFKC').toLowerCase().trim()
-                        );
+                        const tags = (p.tags ?? [])
+                            .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
+                            .filter(Boolean);
 
-                        const selectedTags = st.tagFilters.map(x =>
-                            String(x ?? '').normalize('NFKC').toLowerCase().trim()
-                        );
+                        const selectedTags = (st.tagFilters ?? [])
+                            .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
+                            .filter(Boolean);
 
-                        for (const tag of selectedTags) {
-                            if (!tags.includes(tag)) return false;
+                        if (selectedTags.length && !selectedTags.some(tag => tags.includes(tag))) {
+                            return false;
                         }
                     }
 
