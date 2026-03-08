@@ -128,7 +128,7 @@ const createPanelPromptRef = new Map();
 // key: guildId:userId -> { webhook, messageId }
 const editPanelPromptRef = new Map();
 
-// 店検索状態 key: guildId:userId
+// お店検索状態 key: guildId:userId
 // {
 //   mode: 'create'|'edit',
 //   query: string,
@@ -897,7 +897,7 @@ async function fetchMoreGooglePlaces(query, nextPageToken) {
 function buildPlaceSearchModal(gid, ownerId, mode, currentValue = '') {
     return new ModalBuilder()
         .setCustomId(`modalPlaceSearch:${gid}:${ownerId}:${mode}`)
-        .setTitle('🍽 店を検索')
+        .setTitle('🍽 お店を検索')
         .addComponents(
             new ActionRowBuilder().addComponents(
                 new TextInputBuilder()
@@ -963,7 +963,7 @@ function buildPlaceSearchEmbed(st = {}) {
     const query = st?.query || '';
 
     return new EmbedBuilder()
-        .setTitle('🍽 店検索結果')
+        .setTitle('🍽 お店検索結果')
         .setDescription(
             `検索語: ${query ? `「${query}」` : '(なし)'}\n` +
             `取得件数: ${total}件\n\n` +
@@ -978,7 +978,7 @@ async function renderPlaceSearchPicker(interaction, guildId, userId, { update = 
     if (!st) {
         return interaction.reply({
             ephemeral: true,
-            content: '店検索状態がありません',
+            content: 'お店検索状態がありません',
         });
     }
 
@@ -1069,7 +1069,7 @@ function createPanelComponents(guildId, userId, d = {}) {
 
         new ButtonBuilder()
             .setCustomId(`create:searchPlace:${guildId}:${userId}`)
-            .setLabel('店を検索')
+            .setLabel('お店を検索')
             .setStyle(ButtonStyle.Primary),
 
         new ButtonBuilder()
@@ -1157,7 +1157,7 @@ function editPanelComponents(guildId, userId, d = {}) {
 
         new ButtonBuilder()
             .setCustomId(`edit:searchPlace:${guildId}:${userId}`)
-            .setLabel('店を検索')
+            .setLabel('お店を検索')
             .setStyle(ButtonStyle.Primary),
 
         new ButtonBuilder()
@@ -1663,7 +1663,8 @@ function homeComponents() {
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('home:create').setLabel('➕ 記録する').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('home:search').setLabel('🔎 検索する').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('home:mine').setLabel('📚 自分の記録').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('home:mine').setLabel('📚 自分の記録').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('home:close').setLabel('❌ 終了').setStyle(ButtonStyle.Danger)
         ),
     ];
 }
@@ -1934,7 +1935,7 @@ function confirmDeletePostEmbed(post, { imageIndex = null } = {}) {
 
     const e = buildPostEmbedForView(post, { imageIndex: idx });
 
-    e.setTitle(`⚠ 店情報を削除: ${post.name}`);
+    e.setTitle(`⚠ お店情報を削除: ${post.name}`);
 
     e.spliceFields(0, 0, {
         name: '確認',
@@ -4138,6 +4139,19 @@ client.on(Events.InteractionCreate, async interaction => {
             return renderMineList(interaction, guildId, userId, { update: true });
         }
 
+        if (id === 'home:close') {
+            try {
+                await interaction.message.delete();
+            } catch {
+                await interaction.update({
+                    content: '',
+                    embeds: [],
+                    components: [],
+                });
+            }
+            return;
+        }
+
         // Search panel
         if (id.startsWith('search:setUser:')) {
             const [, , gid, ownerId] = id.split(':');
@@ -5036,7 +5050,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const st = placeSearchState.get(k);
                 if (!st) {
-                    return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
                 }
 
                 const maxPage = Math.max(0, Math.ceil((st.results?.length || 0) / PLACE_PAGE_SIZE) - 1);
@@ -5062,7 +5076,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const st = placeSearchState.get(k);
                 if (!st) {
-                    return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
                 }
 
                 if (!st.nextPageToken) {
@@ -5076,7 +5090,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     content: '',
                     embeds: [
                         new EmbedBuilder()
-                            .setTitle('🍽 店検索結果')
+                            .setTitle('🍽 お店検索結果')
                             .setDescription('追加の候補を読み込み中です...')
                     ],
                     components: [],
@@ -5127,7 +5141,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const st = placeSearchState.get(k);
                 if (!st) {
-                    return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
                 }
 
                 if (st.mode === 'create') {
@@ -5154,7 +5168,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const st = placeSearchState.get(k);
                 if (!st) {
-                    return interaction.reply({ ephemeral: true, content: '店検索状態がありません' });
+                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
                 }
 
                 const idx = Number(picked);
@@ -5389,7 +5403,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 } catch (e) {
                     return interaction.editReply({
-                        content: `店検索に失敗しました: ${e.message}`,
+                        content: `お店検索に失敗しました: ${e.message}`,
                         embeds: [],
                         components: [],
                     });
