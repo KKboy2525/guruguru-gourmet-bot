@@ -1126,11 +1126,6 @@ function createPanelComponents(guildId, userId, d = {}) {
 
         new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId(`create:photos:${guildId}:${userId}`)
-                .setLabel('写真管理')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
                 .setCustomId(`create:submit:${guildId}:${userId}`)
                 .setLabel('作成')
                 .setStyle(ButtonStyle.Primary),
@@ -3640,17 +3635,6 @@ client.on(Events.InteractionCreate, async interaction => {
             });
         }
 
-        if (id.startsWith('create:photos:')) {
-            const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            return interaction.reply({
-                ephemeral: true,
-                content: '写真は記録作成後に追加してください',
-            });
-        }
-
         if (id.startsWith('create:submit:')) {
             const [, , gid, ownerId] = id.split(':');
             if (interaction.guildId !== gid) {
@@ -4140,11 +4124,9 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (id === 'home:close') {
-            return interaction.update({
-                content: '',
-                embeds: [],
-                components: [],
-            });
+            await interaction.deferUpdate();
+            await interaction.message.delete().catch(() => { });
+            return;
         }
 
         // Search panel
