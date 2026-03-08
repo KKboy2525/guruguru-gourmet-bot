@@ -2275,83 +2275,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            if (id.startsWith('search:tagPagePrev:') || id.startsWith('search:tagPageNext:')) {
-                const parts = id.split(':');
-                const gid = parts[2];
-                const ownerId = parts[3];
-                const page = Number(parts[4] || 0);
-
-                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-                await ensureCacheLoadedForGuild(interaction.guild);
-                const cache = getGuildCache(guildId);
-
-                const next = id.includes('tagPageNext') ? page + 1 : page - 1;
-                const { p, totalPages, slice } = tagSlice(cache, next);
-
-                const st = searchState.get(k) ?? {
-                    userIdFilter: null,
-                    prefectureFilters: [],
-                    tagFilters: [],
-                    keyword: '',
-                    ratingFilters: [],
-                    results: [],
-                    page: 0
-                };
-
-                if (!slice.length) {
-                    return interaction.update({
-                        content: '',
-                        embeds: [searchPanelEmbed(st)],
-                        components: searchPanelComponents(guildId, userId, st),
-                    });
-                }
-
-                const select = new StringSelectMenuBuilder()
-                    .setCustomId(`search:tagPick:${guildId}:${ownerId}:${p}`)
-                    .setPlaceholder(`タグを選択してください（複数可） ${p + 1}/${totalPages}`)
-                    .setMinValues(0)
-                    .setMaxValues(slice.length)
-                    .addOptions(
-                        slice.map(x => ({
-                            label: x,
-                            value: x,
-                            default: st.tagFilters?.includes(x) ?? false,
-                        }))
-                    );
-
-                const nav = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`search:tagPagePrev:${guildId}:${ownerId}:${p}`)
-                        .setLabel('◀ 前へ')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(p <= 0),
-
-                    new ButtonBuilder()
-                        .setCustomId(`search:tagPageNext:${guildId}:${ownerId}:${p}`)
-                        .setLabel('次へ ▶')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(p >= totalPages - 1),
-
-                    new ButtonBuilder()
-                        .setCustomId(`search:tagPageClear:${guildId}:${ownerId}`)
-                        .setLabel('解除')
-                        .setStyle(ButtonStyle.Secondary),
-
-                    new ButtonBuilder()
-                        .setCustomId(`search:tagBack:${guildId}:${ownerId}`)
-                        .setLabel('戻る')
-                        .setStyle(ButtonStyle.Secondary),
-                );
-
-                return interaction.update({
-                    content: 'タグを選択してください',
-                    embeds: [],
-                    components: [new ActionRowBuilder().addComponents(select), nav],
-                });
-            }
-
             if (id.startsWith('search:tagPageClear:')) {
                 const parts = id.split(':');
                 const gid = parts[2];
@@ -3469,19 +3392,26 @@ client.on(Events.InteractionCreate, async interaction => {
             draftRating.delete(k);
             createPanelPromptRef.delete(k);
 
+            // 先に待機画面へ更新
+            const waitingMsg = await interaction.editReply({
+                content: '',
+                embeds: [photoCreateWaitingEmbed(post.name)],
+                components: photoWaitingComponentsForCreate(guildId, userId),
+            });
+
             // 写真待ち状態へ
             awaitingPhoto.set(k, {
                 postId: post.id,
                 channelId: interaction.channelId,
                 guildId,
                 backTo: 'home',
+                uiMessageRef: {
+                    webhook: interaction.webhook,
+                    messageId: waitingMsg?.id,
+                },
             });
 
-            return interaction.editReply({
-                content: '',
-                embeds: [photoCreateWaitingEmbed(post.name)],
-                components: photoWaitingComponentsForCreate(guildId, userId),
-            });
+            return;
         }
 
         if (id.startsWith('edit:setVisit:')) {
@@ -5488,12 +5418,4 @@ console.log("LOGIN START");
 client.login(TOKEN).catch(e => {
     console.error('client.login failed:', e);
     process.exit(1);
-});
-
-const app = express();
-app.get("/", (req, res) => res.send("Bot is running"));
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log("Web server running on port", PORT);
 });
