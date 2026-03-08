@@ -2513,6 +2513,38 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         }
 
+        // StringSelectMenu
+        if (interaction.isStringSelectMenu()) {
+            if (id.startsWith('search:tagPick:')) {
+                const [, , gid, ownerId] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0,
+                };
+
+                st.tagFilters = interaction.values ?? [];
+                searchState.set(k, st);
+
+                return interaction.update({
+                    content: '',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+            }
+        }
         if (id.startsWith('confirm:')) {
             const [, answer, kind, gid, ownerId, postId, extra] = id.split(':');
 
