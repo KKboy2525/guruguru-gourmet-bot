@@ -951,67 +951,6 @@ function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null,
     return e;
 }
 
-function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null, notice = null } = {}) {
-    const lines = [];
-
-    if (notice) {
-        lines.push(`📤 ${notice}`);
-        lines.push('');
-    }
-
-    lines.push(visitLabel(post));
-
-    if (hasRating(post)) {
-        lines.push(stars(post.rating));
-        lines.push('');
-    }
-
-    if (post.comment) {
-        lines.push(post.comment);
-        lines.push('');
-    }
-
-    lines.push(`🗾 ${post.prefecture ? post.prefecture : '(未設定)'}`);
-
-    if (post.visited !== false && post.visited_date) {
-        lines.push(`📅 ${post.visited_date}`);
-    }
-
-    lines.push(`🏷 ${tagString(post.tags)}`);
-    lines.push(`👤 登録者 <@${post.created_by}>`);
-
-    if (sharedByUserId) {
-        lines.push(`📤 共有 <@${sharedByUserId}>`);
-    }
-
-    const urls = imageUrls(post);
-    if (urls.length) {
-        const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
-        lines.push(`📷 写真 ${idx + 1}/${urls.length}`);
-    }
-
-    const fields = [
-        { name: '🔗 Webサイト', value: post.url || '(なし)' },
-        { name: '📍 場所', value: post.map_url || '(なし)' },
-    ];
-
-    const e = new EmbedBuilder()
-        .setTitle(`🍽 ${post.name}`)
-        .setDescription(lines.join('\n'))
-        .addFields(fields);
-
-    if (post.updated_at) {
-        e.setFooter({ text: `更新: ${formatJst(post.updated_at)}` });
-    }
-
-    if (urls.length) {
-        const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
-        e.setImage(urls[idx]);
-    }
-
-    return e;
-}
-
 // 自分の記録一覧（カード）
 function buildCardEmbed(post) {
     const lines = [visitLabel(post)];
