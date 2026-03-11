@@ -1784,23 +1784,6 @@ function photoWaitingComponents(guildId, userId) {
     ];
 }
 
-function photoWaitingComponentsForCreate(guildId, userId) {
-    return [
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('photo:waiting')
-                .setLabel('写真を送信待ち')
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(true),
-
-            new ButtonBuilder()
-                .setCustomId(`photo:skip:${guildId}:${userId}`)
-                .setLabel('送信しない')
-                .setStyle(ButtonStyle.Secondary)
-        ),
-    ];
-}
-
 function buildVisitedDateModal(gid, ownerId, mode, postId = '', currentValue = '') {
 
     const todayStr = todayYMD();
@@ -2856,7 +2839,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     st.loadingMore = false;
                     placeSearchState.set(k, st);
 
-                    return interaction.message.edit({
+                    return interaction.editReply({
                         content: '',
                         embeds: [buildPlaceSearchEmbed(st)],
                         components: placeSearchComponents(guildId, userId, st),
@@ -2865,7 +2848,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     st.loadingMore = false;
                     placeSearchState.set(k, st);
 
-                    return interaction.message.edit({
+                    return interaction.editReply({
                         content: `追加読込に失敗しました: ${e.message}`,
                         embeds: [buildPlaceSearchEmbed(st)],
                         components: placeSearchComponents(guildId, userId, st),
@@ -3202,20 +3185,19 @@ client.on(Events.InteractionCreate, async interaction => {
                     const post = cache.get(wait.postId);
 
                     if (post) {
+                        const { detail, components } = renderDetail(interaction, {
+                            post,
+                            guildId,
+                            userId,
+                            fromMine: false,
+                            total: 1,
+                            forceHomeBack: true,
+                        });
+
                         await interaction.update({
                             content: '',
-                            embeds: [
-                                confirmEmbed(
-                                    '📄 詳細を開きますか？',
-                                    `**${post.name}**`
-                                )
-                            ],
-                            components: confirmComponents(
-                                'openDetailAfterCreate',
-                                guildId,
-                                userId,
-                                post.id
-                            ),
+                            embeds: [detail],
+                            components,
                         });
 
                         uiMessages.set(k, new Set([interaction.message.id]));
@@ -4227,21 +4209,23 @@ client.on(Events.InteractionCreate, async interaction => {
             draftRating.delete(k);
             createPanelPromptRef.delete(k);
 
-            const waitingMsg = await interaction.editReply({
+            await interaction.editReply({
                 content: '',
                 embeds: [photoCreateWaitingEmbed(post.name)],
-                components: photoWaitingComponentsForCreate(guildId, userId),
+                components: photoWaitingComponents(guildId, userId),
             });
+
+            const waitingMsg = await interaction.fetchReply().catch(() => null);
 
             awaitingPhoto.set(k, {
                 postId: post.id,
                 channelId: interaction.channelId,
                 guildId,
                 backTo: 'home',
-                uiMessageRef: {
+                uiMessageRef: waitingMsg?.id ? {
                     webhook: interaction.webhook,
-                    messageId: waitingMsg?.id,
-                },
+                    messageId: waitingMsg.id,
+                } : null,
             });
 
             return;
