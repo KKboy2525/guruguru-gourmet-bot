@@ -731,40 +731,37 @@ function imageUrls(post) {
 function buildDetailEmbedsChunks(post, { sharedByUserId = null } = {}) {
     const top = [];
 
-    // 行った / 行きたい
     top.push(visitLabel(post));
 
-    // 行った時だけ評価
     if (post.visited !== false) {
         top.push(hasRating(post) ? stars(post.rating) : '評価なし');
     }
 
-    // コメント
     if (post.comment) {
         top.push('');
-        top.push(post.comment);
+        top.push(safeText(post.comment, 1500));
     }
 
     const body = [
         ...top,
         '',
-        `🗾 ${post.prefecture ? post.prefecture : '(未設定)'}`,
-        ...(post.visited !== false && post.visited_date ? [`📅 ${post.visited_date}`] : []),
-        `🏷 ${tagString(post.tags)}`,
+        `🗾 ${safeText(post.prefecture || '(未設定)', 100)}`,
+        ...(post.visited !== false && post.visited_date ? [`📅 ${safeText(post.visited_date, 20)}`] : []),
+        `🏷 ${safeText(tagString(post.tags), 500)}`,
         `👤 登録者 <@${post.created_by}>`,
         ...(sharedByUserId ? [`📤 共有 <@${sharedByUserId}>`] : []),
     ].join('\n');
 
     const info = new EmbedBuilder()
-        .setTitle(`🍽 ${post.name}`)
-        .setDescription(body)
+        .setTitle(`🍽 ${safeText(post.name || '(名称不明)', 200)}`)
+        .setDescription(safeText(body, 4000))
         .addFields(
-            { name: '🔗 Webサイト', value: post.url || '(なし)' },
-            { name: '📍 場所', value: post.map_url || '(なし)' }
+            { name: '🔗 Webサイト', value: safeText(post.url || '(なし)', 1000) },
+            { name: '📍 場所', value: safeText(post.map_url || '(なし)', 1000) }
         );
 
     if (post.updated_at) {
-        info.setFooter({ text: `更新: ${formatJst(post.updated_at)}` });
+        info.setFooter({ text: safeText(`更新: ${formatJst(post.updated_at)}`, 200) });
     }
 
     const images = imageUrls(post);
@@ -887,6 +884,81 @@ function isImageAttachment(att) {
         name.endsWith('.webp') ||
         name.endsWith('.gif')
     );
+}
+
+function safeText(v, max = 1000) {
+    return String(v ?? '').slice(0, max);
+}
+
+function imageUrls(post) {
+    return (post.images ?? [])
+        .map(x => {
+            const url = typeof x === 'string' ? x : x?.url;
+            if (!url) return null;
+            return String(url).slice(0, 1900);
+        })
+        .filter(Boolean);
+}
+
+function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null, notice = null } = {}) {
+    const lines = [];
+
+    if (notice) {
+        lines.push(`📤 ${safeText(notice, 200)}`);
+        lines.push('');
+    }
+
+    lines.push(visitLabel(post));
+
+    if (hasRating(post)) {
+        lines.push(stars(post.rating));
+        lines.push('');
+    }
+
+    if (post.comment) {
+        lines.push(safeText(post.comment, 1500));
+        lines.push('');
+    }
+
+    lines.push(`🗾 ${safeText(post.prefecture || '(未設定)', 100)}`);
+
+    if (post.visited !== false && post.visited_date) {
+        lines.push(`📅 ${safeText(post.visited_date, 20)}`);
+    }
+
+    lines.push(`🏷 ${safeText(tagString(post.tags), 500)}`);
+    lines.push(`👤 登録者 <@${post.created_by}>`);
+
+    if (sharedByUserId) {
+        lines.push(`📤 共有 <@${sharedByUserId}>`);
+    }
+
+    const urls = imageUrls(post);
+    if (urls.length) {
+        const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
+        lines.push(`📷 写真 ${idx + 1}/${urls.length}`);
+    }
+
+    const fields = [
+        { name: '🔗 Webサイト', value: safeText(post.url || '(なし)', 1000) },
+        { name: '📍 場所', value: safeText(post.map_url || '(なし)', 1000) },
+    ];
+
+    const e = new EmbedBuilder()
+        .setTitle(`🍽 ${safeText(post.name || '(名称不明)', 200)}`)
+        .setDescription(safeText(lines.join('\n'), 4000))
+        .addFields(fields);
+
+    if (post.updated_at) {
+        e.setFooter({ text: safeText(`更新: ${formatJst(post.updated_at)}`, 200) });
+    }
+
+    if (urls.length) {
+        const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
+        e.setImage(urls[idx]);
+    }
+
+    return e;
 }
 
 function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null, notice = null } = {}) {
@@ -1255,11 +1327,11 @@ function buildPlaceSearchModal(gid, ownerId, mode, currentValue = '') {
 function placeSearchComponents(guildId, userId, st) {
     const { p, totalPages, slice } = placeSlice(st.results ?? [], st.page ?? 0);
 
-    const options = slice.length
-        ? slice.map((x, i) => ({
-            label: (x.name || '(名称不明)').slice(0, 100),
-            description: (x.address || '住所なし').slice(0, 100),
-            value: String((p * PLACE_PAGE_SIZE) + i),
+    const options = slice?.length
+        ? slice.slice(0, 25).map((x, i) => ({
+            label: String(x?.name ?? '(名称不明)').slice(0, 100),
+            description: String(x?.address ?? '住所なし').slice(0, 100),
+            value: String((p * PLACE_PAGE_SIZE) + i).slice(0, 100),
         }))
         : [{ label: '(候補なし)', description: '選択できません', value: 'none' }];
 
@@ -3458,9 +3530,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     photoView.set(k, { postId, idx });
 
                     const embed = new EmbedBuilder()
-                        .setTitle(`🖼 写真管理: ${post.name}`)
-                        .setDescription(urls.length ? `写真 ${idx + 1}/${urls.length}` : '写真はありません')
-                        .setImage(urls.length ? urls[idx] : null);
+                        .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+                        .setDescription(total ? `写真 ${pv.idx + 1}/${total}` : '写真はありません');
+
+                    if (total && urls[pv.idx]) {
+                        embed.setImage(urls[pv.idx]);
+                    }
 
                     return interaction.update({
                         content: '',
@@ -3486,10 +3561,13 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 photoView.set(k, { postId, idx: newIdx });
 
+                // confirm no -> deletePhoto 戻り
                 const embed = new EmbedBuilder()
-                    .setTitle(`🖼 写真管理: ${fresh.name}`)
-                    .setDescription(urls.length ? `写真 ${newIdx + 1}/${urls.length}` : '写真はありません')
-                    .setImage(urls.length ? urls[newIdx] : null);
+                    .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+                    .setDescription(urls.length ? `写真 ${idx + 1}/${urls.length}` : '写真はありません');
+                if (urls.length && urls[idx]) {
+                    embed.setImage(urls[idx]);
+                }
 
                 return interaction.update({
                     embeds: [embed],
@@ -3512,10 +3590,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (pv.idx >= urls.length) pv.idx = Math.max(0, urls.length - 1);
                 photoView.set(k, pv);
 
+                // deletePhoto 後
                 const embed = new EmbedBuilder()
-                    .setTitle(`🖼 写真管理: ${post.name}`)
-                    .setDescription(urls.length ? `写真 ${pv.idx + 1}/${urls.length}` : '写真はありません')
-                    .setImage(urls.length ? urls[pv.idx] : null);
+                    .setTitle(`🖼 写真管理: ${safeText(fresh.name || '(名称不明)', 200)}`)
+                    .setDescription(urls.length ? `写真 ${newIdx + 1}/${urls.length}` : '写真はありません');
+                if (urls.length && urls[newIdx]) {
+                    embed.setImage(urls[newIdx]);
+                }
 
                 return interaction.update({
                     content: '',
@@ -3664,10 +3745,13 @@ client.on(Events.InteractionCreate, async interaction => {
             const newIdx = Math.max(0, Math.min(idx, urls.length - 1));
             photoView.set(k, { postId, idx: newIdx });
 
+            // ph: prev next back 以外の通常表示
             const embed = new EmbedBuilder()
-                .setTitle(`🖼 写真管理: ${fresh.name}`)
-                .setDescription(urls.length ? `写真 ${newIdx + 1}/${urls.length}` : '写真はありません')
-                .setImage(urls.length ? urls[newIdx] : null);
+                .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+                .setDescription(newTotal ? `写真 ${pv.idx + 1}/${newTotal}` : '写真はありません');
+            if (newTotal && urls2[pv.idx]) {
+                embed.setImage(urls2[pv.idx]);
+            }
 
             return interaction.update({
                 embeds: [embed],
