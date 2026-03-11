@@ -3,8 +3,22 @@
 
 import express from "express";
 import dotenv from "dotenv";
+import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
+
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+if (!SUPABASE_URL) throw new Error('SUPABASE_URL is required');
+if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required');
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+    },
+});
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
@@ -142,6 +156,115 @@ const placeSearchState = new Map();
 // ====== util ======
 function nowIso() {
     return new Date().toISOString();
+}
+
+async function copyDiscordImageToSupabase(url, guildId, postId, idx) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`画像取得失敗 ${res.status}`);
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+
+    const path = `${guildId}/${postId}/${Date.now()}-${idx}.jpg`;
+
+    const { error } = await supabase.storage
+        .from('post-images')
+        .upload(path, buffer, {
+            contentType: 'image/jpeg'
+        });
+
+    if (error) throw error;
+
+    const { data } = supabase.storage
+        .from('post-images')
+        .getPublicUrl(path);
+
+    return data.publicUrl;
+}
+
+async function uploadImageToSupabaseStorage({
+    guildId,
+    postId,
+    sourceBuffer,
+    filename,
+    contentType,
+}) {
+    const safeName = (filename || 'image').replace(/[^\w.\-]/g, '_');
+    const path = `${guildId}/${postId}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+        .from('post-images')
+        .upload(path, sourceBuffer, {
+            contentType: contentType || 'application/octet-stream',
+            upsert: false,
+        });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+        .from('post-images')
+        .getPublicUrl(path);
+
+    return {
+        path,
+        publicUrl: data.publicUrl,
+    };
+}
+
+async function uploadImageToSupabaseStorage({
+    guildId,
+    postId,
+    sourceBuffer,
+    filename,
+    contentType,
+}) {
+    const safeName = (filename || 'image').replace(/[^\w.\-]/g, '_');
+    const path = `${guildId}/${postId}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+        .from('post-images')
+        .upload(path, sourceBuffer, {
+            contentType: contentType || 'application/octet-stream',
+            upsert: false,
+        });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+        .from('post-images')
+        .getPublicUrl(path);
+
+    return {
+        path,
+        publicUrl: data.publicUrl,
+    };
+}
+
+async function fetchImageAsBuffer(url) {
+    const res = await fetch(url);
+    if (!res.ok) {
+        throw new Error(`画像取得失敗: ${res.status} ${url}`);
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+}
+
+function normalizeDateForDb(s) {
+    const v = normalizeVisitedDate(s);
+    if (!v) return null;
+    return v.replace(/\//g, '-');
+}
+
+function uniqueStrings(arr = []) {
+    return [...new Set(
+        arr
+            .map(x => String(x ?? '').trim())
+            .filter(Boolean)
+    )];
+}
+
+function visibilityToDb(_post) {
+    return 'server';
 }
 
 function formatJst(date) {
@@ -2032,11 +2155,261 @@ function searchResultListComponents(guildId, userId, page, hasPrev, hasNext, opt
     ];
 }
 
+// ====== Supabase migration ======
+async function ensureServerRow(guild) {
+    const payload = {
+        discord_server_id: guild.id,
+        name: guild.name ?? 'unknown',
+        icon_url: guild.iconURL?.() ?? null,
+    };
+
+    const { data, error } = await supabase
+        .from('servers')
+        .upsert(payload, { onConflict: 'discord_server_id' })
+        .select('id, discord_server_id')
+        .single();
+
+    if (error) throw error;
+    return data;
+}
+
+async function ensureUserRow(discordUserId, guild) {
+    let member = null;
+    try {
+        member = await guild.members.fetch(discordUserId);
+    } catch { }
+
+    const payload = {
+        discord_user_id: discordUserId,
+        name: member?.user?.username ?? null,
+        avatar_url: member?.user?.displayAvatarURL?.() ?? null,
+    };
+
+    const { data, error } = await supabase
+        .from('users')
+        .upsert(payload, { onConflict: 'discord_user_id' })
+        .select('id, discord_user_id')
+        .single();
+
+    if (error) throw error;
+    return data;
+}
+
+async function ensureTagRows(tags = []) {
+    const normalized = uniqueStrings(tags);
+    if (!normalized.length) return new Map();
+
+    const rows = normalized.map(name => ({ name }));
+
+    const { error: upsertError } = await supabase
+        .from('tags')
+        .upsert(rows, { onConflict: 'name' });
+
+    if (upsertError) throw upsertError;
+
+    const { data, error } = await supabase
+        .from('tags')
+        .select('id, name')
+        .in('name', normalized);
+
+    if (error) throw error;
+
+    const map = new Map();
+    for (const row of data ?? []) {
+        map.set(row.name, row.id);
+    }
+    return map;
+}
+
+async function findMigratedPostByLegacyId(legacyId) {
+    const { data, error } = await supabase
+        .from('posts')
+        .select('id, legacy_discord_message_id')
+        .eq('legacy_discord_message_id', legacyId)
+        .maybeSingle();
+
+    if (error) throw error;
+    return data;
+}
+
+async function insertPostIfNeeded({ guildRow, userRow, post }) {
+    const legacyId = String(post.id);
+    const existing = await findMigratedPostByLegacyId(legacyId);
+
+    if (existing) {
+        return { postRow: existing, inserted: false };
+    }
+
+    const payload = {
+        server_id: guildRow.id,
+        user_id: userRow.id,
+        shop_id: null,
+
+        shop_name: post.name?.trim() || '(名称不明)',
+        shop_prefecture: post.prefecture?.trim() || null,
+        shop_map_url: post.map_url?.trim() || null,
+        shop_website_url: post.url?.trim() || null,
+
+        visited: post.visited !== false,
+        rating: post.visited === false ? null : (post.rating == null ? null : Number(post.rating)),
+        comment: post.comment?.trim() || null,
+        visited_date: post.visited === false ? null : normalizeDateForDb(post.visited_date),
+
+        visibility: visibilityToDb(post),
+
+        created_at: post.created_at || nowIso(),
+        updated_at: post.updated_at || nowIso(),
+        legacy_discord_message_id: legacyId,
+    };
+
+    const { data, error } = await supabase
+        .from('posts')
+        .insert(payload)
+        .select('id, legacy_discord_message_id')
+        .single();
+
+    if (error) throw error;
+    return { postRow: data, inserted: true };
+}
+
+async function replacePostImages(postRowId, post) {
+    const { error: deleteError } = await supabase
+        .from('post_images')
+        .delete()
+        .eq('post_id', postRowId);
+
+    if (deleteError) throw deleteError;
+
+    const urls = imageUrls(post);
+    if (!urls.length) return 0;
+
+    const rows = urls.map((url, idx) => ({
+        post_id: postRowId,
+        image_url: url,
+        sort_order: idx,
+    }));
+
+    const { error: insertError } = await supabase
+        .from('post_images')
+        .insert(rows);
+
+    if (insertError) throw insertError;
+    return rows.length;
+}
+
+async function replacePostTags(postRowId, tags = []) {
+    const { error: deleteError } = await supabase
+        .from('post_tags')
+        .delete()
+        .eq('post_id', postRowId);
+
+    if (deleteError) throw deleteError;
+
+    const normalized = uniqueStrings(tags);
+    if (!normalized.length) return 0;
+
+    const tagMap = await ensureTagRows(normalized);
+
+    const rows = normalized
+        .map(name => {
+            const tagId = tagMap.get(name);
+            if (!tagId) return null;
+            return {
+                post_id: postRowId,
+                tag_id: tagId,
+            };
+        })
+        .filter(Boolean);
+
+    if (!rows.length) return 0;
+
+    const { error: insertError } = await supabase
+        .from('post_tags')
+        .insert(rows);
+
+    if (insertError) throw insertError;
+
+    return rows.length;
+}
+
+async function migrateGuildCacheToSupabase(guild) {
+    await ensureCacheLoadedForGuild(guild);
+
+    const cache = getGuildCache(guild.id);
+    const guildRow = await ensureServerRow(guild);
+
+    const posts = [...cache.values()].sort((a, b) =>
+        String(a.created_at || '').localeCompare(String(b.created_at || ''))
+    );
+
+    let migratedPosts = 0;
+    let skippedPosts = 0;
+    let migratedImages = 0;
+    let migratedTagLinks = 0;
+    let failedPosts = 0;
+
+    for (const post of posts) {
+        try {
+            const userRow = await ensureUserRow(post.created_by, guild);
+
+            const { postRow, inserted } = await insertPostIfNeeded({
+                guildRow,
+                userRow,
+                post,
+            });
+
+            if (inserted) {
+                migratedPosts++;
+            } else {
+                skippedPosts++;
+            }
+
+            const urls = imageUrls(post);
+            const newUrls = [];
+
+            for (let i = 0; i < urls.length; i++) {
+                const url = urls[i];
+
+                const newUrl = await copyDiscordImageToSupabase(
+                    url,
+                    guild.id,
+                    post.id,
+                    i
+                );
+
+                newUrls.push(newUrl);
+            }
+
+            post.images = newUrls;
+
+            migratedImages += await replacePostImages(postRow.id, post);
+            migratedTagLinks += await replacePostTags(postRow.id, post.tags ?? []);
+        } catch (e) {
+            failedPosts++;
+            console.error('migrate post failed:', post?.id, e);
+        }
+    }
+
+    return {
+        totalCachePosts: posts.length,
+        migratedPosts,
+        skippedPosts,
+        migratedImages,
+        migratedTagLinks,
+        failedPosts,
+    };
+}
+
 // ====== コマンド登録 ======
 async function registerCommands() {
-    const cmd = new SlashCommandBuilder()
+    const gourmetCmd = new SlashCommandBuilder()
         .setName('gourmet')
         .setDescription('グルメ記録を開く');
+
+    const migrateCmd = new SlashCommandBuilder()
+        .setName('gourmet-migrate')
+        .setDescription('Discord保存データをSupabaseへ移行する')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
     const rest = new REST({ version: '10' }).setToken(TOKEN);
 
@@ -2045,7 +2418,7 @@ async function registerCommands() {
     for (const [, g] of guilds) {
         await rest.put(
             Routes.applicationGuildCommands(client.user.id, g.id),
-            { body: [cmd.toJSON()] }
+            { body: [gourmetCmd.toJSON(), migrateCmd.toJSON()] }
         );
     }
 
@@ -2329,27 +2702,64 @@ client.on(Events.InteractionCreate, async interaction => {
 
         // Slash command
         if (interaction.isChatInputCommand()) {
-            if (interaction.commandName !== 'gourmet') return;
+            if (interaction.commandName === 'gourmet') {
+                await interaction.deferReply({ ephemeral: true });
 
-            await interaction.deferReply({ ephemeral: true });
+                try {
+                    await ensureCacheLoadedForGuild(interaction.guild);
+                } catch (e) {
+                    return interaction.editReply({
+                        content: `エラー: ${e.message}`,
+                        embeds: [],
+                        components: [],
+                    });
+                }
 
-            try {
-                await ensureCacheLoadedForGuild(interaction.guild);
-            } catch (e) {
-                return interaction.editReply({
-                    content: `エラー: ${e.message}`,
-                    embeds: [],
-                    components: [],
+                await interaction.editReply({
+                    content: '',
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
                 });
+
+                await rememberUiReply(interaction, guildId, userId);
+                return;
             }
 
-            await interaction.editReply({
-                content: '',
-                embeds: [homeEmbed()],
-                components: homeComponents(),
-            });
+            if (interaction.commandName === 'gourmet-migrate') {
+                if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: '管理者のみ実行できます',
+                    });
+                }
 
-            await rememberUiReply(interaction, guildId, userId);
+                await interaction.deferReply({ ephemeral: true });
+
+                try {
+                    const result = await migrateGuildCacheToSupabase(interaction.guild);
+
+                    return interaction.editReply({
+                        content:
+                            `Supabase移行完了\n\n` +
+                            `対象投稿数: ${result.totalCachePosts}\n` +
+                            `新規移行: ${result.migratedPosts}\n` +
+                            `スキップ: ${result.skippedPosts}\n` +
+                            `画像移行: ${result.migratedImages}\n` +
+                            `タグ関連付け: ${result.migratedTagLinks}\n` +
+                            `失敗: ${result.failedPosts}`,
+                        embeds: [],
+                        components: [],
+                    });
+                } catch (e) {
+                    console.error('gourmet-migrate failed:', e);
+                    return interaction.editReply({
+                        content: `移行エラー: ${e.message}`,
+                        embeds: [],
+                        components: [],
+                    });
+                }
+            }
+
             return;
         }
 
