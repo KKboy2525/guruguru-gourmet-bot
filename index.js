@@ -210,35 +210,6 @@ async function uploadImageToSupabaseStorage({
     };
 }
 
-async function uploadImageToSupabaseStorage({
-    guildId,
-    postId,
-    sourceBuffer,
-    filename,
-    contentType,
-}) {
-    const safeName = (filename || 'image').replace(/[^\w.\-]/g, '_');
-    const path = `${guildId}/${postId}/${Date.now()}-${safeName}`;
-
-    const { error: uploadError } = await supabase.storage
-        .from('post-images')
-        .upload(path, sourceBuffer, {
-            contentType: contentType || 'application/octet-stream',
-            upsert: false,
-        });
-
-    if (uploadError) throw uploadError;
-
-    const { data } = supabase.storage
-        .from('post-images')
-        .getPublicUrl(path);
-
-    return {
-        path,
-        publicUrl: data.publicUrl,
-    };
-}
-
 async function fetchImageAsBuffer(url) {
     const res = await fetch(url);
     if (!res.ok) {
