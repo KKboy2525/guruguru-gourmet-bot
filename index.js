@@ -200,13 +200,98 @@ function nowIso() {
     return new Date().toISOString();
 }
 
-async function deletePostImageDb(imageId) {
+async function deleteImageFileFromStorage(storagePath) {
+    if (!storagePath) return;
+
+    const normalized = String(storagePath).replace(/^\/+/, '');
+
+    const { error } = await supabase.storage
+        .from('post-images')
+        .remove([normalized]);
+
+    if (error) throw error;
+}
+
+async function deletePostImageWithStorage(imageRow) {
+    if (!imageRow?.id) {
+        throw new Error('image id is required');
+    }
+
+    if (imageRow.storage_path) {
+        await deleteImageFileFromStorage(imageRow.storage_path);
+    }
+
     const { error } = await supabase
         .from('post_images')
         .delete()
-        .eq('id', imageId);
+        .eq('id', imageRow.id);
 
     if (error) throw error;
+}
+
+async function deleteAllPostImagesWithStorage(postId) {
+    const { data, error } = await supabase
+        .from('post_images')
+        .select('id, storage_path')
+        .eq('post_id', postId);
+
+    if (error) throw error;
+
+    const paths = (data ?? [])
+        .map(x => x.storage_path)
+        .filter(Boolean)
+        .map(x => String(x).replace(/^\/+/, ''));
+
+    if (paths.length) {
+        const { error: storageError } = await supabase.storage
+            .from('post-images')
+            .remove(paths);
+
+        if (storageError) throw storageError;
+    }
+
+    const { error: deleteError } = await supabase
+        .from('post_images')
+        .delete()
+        .eq('post_id', postId);
+
+    if (deleteError) throw deleteError;
+}
+
+async function deletePostWithImagesAndStorage(postId) {
+    const { data: images, error: imageErr } = await supabase
+        .from('post_images')
+        .select('id, storage_path')
+        .eq('post_id', postId);
+
+    if (imageErr) throw imageErr;
+
+    const paths = (images ?? [])
+        .map(x => x.storage_path)
+        .filter(Boolean)
+        .map(x => String(x).replace(/^\/+/, ''));
+
+    if (paths.length) {
+        const { error: storageError } = await supabase.storage
+            .from('post-images')
+            .remove(paths);
+
+        if (storageError) throw storageError;
+    }
+
+    const { error: deleteImagesErr } = await supabase
+        .from('post_images')
+        .delete()
+        .eq('post_id', postId);
+
+    if (deleteImagesErr) throw deleteImagesErr;
+
+    const { error: deletePostErr } = await supabase
+        .from('posts')
+        .delete()
+        .eq('id', postId);
+
+    if (deletePostErr) throw deletePostErr;
 }
 
 async function deletePostDb(postId) {
@@ -227,15 +312,6 @@ async function deletePostDb(postId) {
         .delete()
         .eq('id', postId);
     if (postErr) throw postErr;
-}
-
-async function deleteAllPostImagesDb(postId) {
-    const { error } = await supabase
-        .from('post_images')
-        .delete()
-        .eq('post_id', postId);
-
-    if (error) throw error;
 }
 
 async function updatePostInDb(guild, discordUserId, d) {
@@ -2831,20 +2907,23 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
                 }
 
+                const emptyState = {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0,
+                };
+
                 const st = searchState.get(k);
+
                 if (!st?.results?.length) {
                     return interaction.update({
                         content: '該当する記録がありません',
-                        embeds: [searchPanelEmbed(st ?? {
-                            userIdFilter: null,
-                            prefectureFilters: [],
-                            tagFilters: [],
-                            keyword: '',
-                            ratingFilters: [],
-                            results: [],
-                            page: 0,
-                        })],
-                        components: searchPanelComponents(guildId, userId, st ?? {}),
+                        embeds: [searchPanelEmbed(st ?? emptyState)],
+                        components: searchPanelComponents(guildId, userId, st ?? emptyState),
                     });
                 }
 
@@ -3490,7 +3569,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const fromMine = cameFromMine(k, postId, mineState);
 
-                await deletePostDb(postId);
+                await deletePostWithImagesAndStorage(postId);
 
                 cacheReadyByGuild.set(guildId, false);
                 await ensureCacheLoadedForGuild(interaction.guild);
@@ -3535,13 +3614,12 @@ client.on(Events.InteractionCreate, async interaction => {
                 const imgs = post.images ?? [];
                 const idx = Math.max(0, Math.min(imgs.length - 1, Number(extra) || 0));
                 const target = imgs[idx];
-                const imageId = target?.id;
 
-                if (!imageId) {
+                if (!target?.id) {
                     return interaction.reply({ ephemeral: true, content: '写真IDが見つかりません' });
                 }
 
-                await deletePostImageDb(imageId);
+                await deletePostImageWithStorage(target);
 
                 cacheReadyByGuild.set(guildId, false);
                 await ensureCacheLoadedForGuild(interaction.guild);
@@ -3578,7 +3656,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ ephemeral: true, content: '操作できるのは登録者または管理者のみです' });
                 }
 
-                await deleteAllPostImagesDb(postId);
+                await deleteAllPostImagesWithStorage(postId);
 
                 cacheReadyByGuild.set(guildId, false);
                 await ensureCacheLoadedForGuild(interaction.guild);
