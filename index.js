@@ -20,6 +20,47 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     },
 });
 
+function mapDbPostToView(row) {
+    return {
+        id: row.id,
+        server_id: row.server_id,
+        user_id: row.user_id,
+        shop_id: row.shop_id,
+
+        name: row.shop_name ?? row.shops?.name ?? '',
+        prefecture: row.shop_prefecture ?? row.shops?.prefecture ?? '',
+        map_url: row.shop_map_url ?? row.shops?.map_url ?? '',
+        url: row.shop_website_url ?? row.shops?.website_url ?? '',
+
+        visited: row.visited !== false,
+        rating: row.rating,
+        comment: row.comment ?? '',
+        visited_date: row.visited_date
+            ? new Date(row.visited_date).toLocaleDateString('ja-JP').replace(/\//g, '/')
+            : '',
+
+        visibility: row.visibility,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+
+        created_by: row.users?.discord_user_id ?? null,
+        created_by_name: row.users?.name ?? null,
+
+        tags: (row.post_tags ?? [])
+            .map(x => x.tags?.name)
+            .filter(Boolean),
+
+        images: (row.post_images ?? [])
+            .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+            .map(x => ({
+                id: x.id,
+                url: x.image_url,
+                storage_path: x.storage_path ?? null,
+                sort_order: x.sort_order ?? 0,
+            })),
+    };
+}
+
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 app.get('/', (_req, res) => {
@@ -158,6 +199,151 @@ function nowIso() {
     return new Date().toISOString();
 }
 
+async function deletePostImageDb(imageId) {
+    const { error } = await supabase
+        .from('post_images')
+        .delete()
+        .eq('id', imageId);
+
+    if (error) throw error;
+}
+
+async function deletePostDb(postId) {
+    const { error } = await supabase
+        .from('posts')
+        .delete()
+        .eq('id', postId);
+
+    if (error) throw error;
+}
+
+async function deleteAllPostImagesDb(postId) {
+    const { error } = await supabase
+        .from('post_images')
+        .delete()
+        .eq('post_id', postId);
+
+    if (error) throw error;
+}
+
+async function updatePostInDb(guild, discordUserId, d) {
+    const serverRow = await ensureServerRow(guild);
+    const userRow = await ensureUserRow(discordUserId, guild);
+    const shopRow = await upsertShopFromDraft(d);
+
+    const payload = {
+        server_id: serverRow.id,
+        user_id: userRow.id,
+        shop_id: shopRow?.id ?? null,
+
+        shop_name: d.name?.trim() || '(名称不明)',
+        shop_prefecture: d.prefecture?.trim() || null,
+        shop_map_url: d.mapUrl?.trim() || null,
+        shop_website_url: d.url?.trim() || null,
+
+        visited: d.visited !== false,
+        rating: d.visited === false ? null : Number(d.rating),
+        comment: d.comment?.trim() || null,
+        visited_date: d.visited === false ? null : normalizeDateForDb(d.visitedDate),
+    };
+
+    const { error } = await supabase
+        .from('posts')
+        .update(payload)
+        .eq('id', d.postId);
+
+    if (error) throw error;
+
+    await replacePostTagsDb(d.postId, d.tags ?? []);
+}
+
+async function createPostInDb(guild, discordUserId, d) {
+    const serverRow = await ensureServerRow(guild);
+    const userRow = await ensureUserRow(discordUserId, guild);
+    const shopRow = await upsertShopFromDraft(d);
+
+    const payload = {
+        server_id: serverRow.id,
+        user_id: userRow.id,
+        shop_id: shopRow?.id ?? null,
+
+        shop_name: d.name?.trim() || '(名称不明)',
+        shop_prefecture: d.prefecture?.trim() || null,
+        shop_map_url: d.mapUrl?.trim() || null,
+        shop_website_url: d.url?.trim() || null,
+
+        visited: d.visited !== false,
+        rating: d.visited === false ? null : Number(d.rating),
+        comment: d.comment?.trim() || null,
+        visited_date: d.visited === false
+            ? null
+            : normalizeDateForDb(d.visitedDate),
+
+        visibility: 'server',
+    };
+
+    const { data, error } = await supabase
+        .from('posts')
+        .insert(payload)
+        .select(`
+            id,
+            server_id,
+            user_id,
+            shop_id,
+            shop_name,
+            shop_prefecture,
+            shop_map_url,
+            shop_website_url,
+            visited,
+            rating,
+            comment,
+            visited_date,
+            visibility,
+            created_at,
+            updated_at,
+            users!posts_user_id_fkey (
+                id,
+                discord_user_id,
+                name
+            )
+        `)
+        .single();
+
+    if (error) throw error;
+
+    await replacePostTagsDb(data.id, d.tags ?? []);
+
+    return data.id;
+}
+
+async function replacePostTagsDb(postId, tags = []) {
+    const normalized = uniqueStrings(tags);
+
+    const { error: delErr } = await supabase
+        .from('post_tags')
+        .delete()
+        .eq('post_id', postId);
+    if (delErr) throw delErr;
+
+    if (!normalized.length) return;
+
+    const tagMap = await ensureTagRows(normalized);
+
+    const rows = normalized
+        .map(name => {
+            const tagId = tagMap.get(name);
+            if (!tagId) return null;
+            return { post_id: postId, tag_id: tagId };
+        })
+        .filter(Boolean);
+
+    const { error: insErr } = await supabase
+        .from('post_tags')
+        .insert(rows);
+
+    if (insErr) throw insErr;
+}
+
 async function copyDiscordImageToSupabase(url, guildId, postId, idx) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`画像取得失敗 ${res.status}`);
@@ -208,6 +394,48 @@ async function uploadImageToSupabaseStorage({
         path,
         publicUrl: data.publicUrl,
     };
+}
+
+async function addPostImagesDb(postId, files = []) {
+    const rows = [];
+
+    const { data: existing, error: existingErr } = await supabase
+        .from('post_images')
+        .select('sort_order')
+        .eq('post_id', postId)
+        .order('sort_order', { ascending: false })
+        .limit(1);
+
+    if (existingErr) throw existingErr;
+
+    let nextSort = (existing?.[0]?.sort_order ?? -1) + 1;
+
+    for (const file of files) {
+        const buffer = await fetchImageAsBuffer(file.url);
+
+        const uploaded = await uploadImageToSupabaseStorage({
+            guildId: 'discord',
+            postId,
+            sourceBuffer: buffer,
+            filename: file.name || 'image',
+            contentType: file.contentType || 'application/octet-stream',
+        });
+
+        rows.push({
+            post_id: postId,
+            image_url: uploaded.publicUrl,
+            storage_path: uploaded.path,
+            sort_order: nextSort++,
+        });
+    }
+
+    if (!rows.length) return;
+
+    const { error } = await supabase
+        .from('post_images')
+        .insert(rows);
+
+    if (error) throw error;
 }
 
 async function fetchImageAsBuffer(url) {
@@ -797,59 +1025,96 @@ async function ensureCacheLoadedForGuild(guild) {
     const guildId = guild.id;
     if (cacheReadyByGuild.get(guildId)) return;
 
-    const dbCh = await getDbChannelForGuild(guild);
-    if (!dbCh?.isTextBased()) throw new Error(`#${DB_CHANNEL_NAME} はテキストチャンネルである必要があります`);
+    const { data: serverRow, error: serverErr } = await supabase
+        .from('servers')
+        .select('id, discord_server_id')
+        .eq('discord_server_id', guildId)
+        .maybeSingle();
+
+    if (serverErr) throw serverErr;
 
     const cache = getGuildCache(guildId);
+    cache.clear();
 
-    const imgMap = new Map(); // postId -> [{url,msgId,ts}]
-    let lastId = undefined;
-    let scanned = 0;
-
-    while (true) {
-        const fetched = await dbCh.messages.fetch({ limit: 100, before: lastId });
-        if (!fetched.size) break;
-
-        for (const [, msg] of fetched) {
-            if (msg.author?.id !== client.user.id) continue;
-            scanned++;
-
-            // __IMG__ はここで拾う
-            if (msg.content?.startsWith('__IMG__:')) {
-                const parts = msg.content.split(':'); // ["__IMG__", postId, iso]
-                const postId = parts[1];
-                const att = msg.attachments.first();
-                if (postId && att?.url) {
-                    if (!imgMap.has(postId)) imgMap.set(postId, []);
-                    imgMap.get(postId).push({
-                        url: att.url,
-                        msgId: msg.id,
-                        ts: msg.createdTimestamp,
-                    });
-                }
-                continue;
-            }
-
-            // 正本embed
-            const post = extractPostFromMessage(msg);
-            if (!post) continue;
-            cache.set(post.id, post);
-        }
-
-        lastId = fetched.last().id;
+    if (!serverRow) {
+        cacheReadyByGuild.set(guildId, true);
+        return;
     }
 
-    // 画像をpostへ復元（時系列順）
-    for (const [postId, list] of imgMap) {
-        const post = cache.get(postId);
-        if (!post) continue;
-        list.sort((a, b) => a.ts - b.ts);
-        post.images = list; // オブジェクト配列で保持
-        cache.set(postId, post);
+    const { data, error } = await supabase
+        .from('posts')
+        .select(`
+            id,
+            server_id,
+            user_id,
+            shop_id,
+            shop_name,
+            shop_prefecture,
+            shop_map_url,
+            shop_website_url,
+            visited,
+            rating,
+            comment,
+            visited_date,
+            visibility,
+            created_at,
+            updated_at,
+            users!posts_user_id_fkey (
+                id,
+                discord_user_id,
+                name
+            ),
+            post_images (
+                id,
+                image_url,
+                storage_path,
+                sort_order
+            ),
+            post_tags (
+                tag_id,
+                tags (
+                    id,
+                    name
+                )
+            )
+        `)
+        .eq('server_id', serverRow.id)
+        .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    for (const row of data ?? []) {
+        const post = mapDbPostToView(row);
+        cache.set(post.id, post);
     }
 
     cacheReadyByGuild.set(guildId, true);
-    console.log(`Cache loaded for guild ${guildId}: ${cache.size} posts (scanned ${scanned} bot posts)`);
+}
+
+async function upsertShopFromDraft(d) {
+    const place = d.place ?? null;
+
+    if (!place?.placeId) {
+        return null;
+    }
+
+    const payload = {
+        place_id: place.placeId,
+        name: place.name || d.name?.trim() || '(名称不明)',
+        address: place.address || null,
+        prefecture: d.prefecture || null,
+        map_url: place.mapUrl || d.mapUrl || null,
+        website_url: d.url || null,
+    };
+
+    const { data, error } = await supabase
+        .from('shops')
+        .upsert(payload, { onConflict: 'place_id' })
+        .select('*')
+        .single();
+
+    if (error) throw error;
+    return data;
 }
 
 function canEdit(interaction, post) {
@@ -2875,8 +3140,16 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
                 const st = searchState.get(k);
-                if (!st?.results?.length) {
-                    return interaction.reply({ ephemeral: true, content: '検索結果がありません' });
+                if (st) {
+                    if (st.results?.length) {
+                        return renderSearchResultList(interaction, guildId, userId, { update: true });
+                    }
+
+                    return interaction.update({
+                        content: '該当する記録がなくなりました',
+                        embeds: [searchPanelEmbed(st)],
+                        components: searchPanelComponents(guildId, userId, st),
+                    });
                 }
 
                 const pageSize = 9;
@@ -3512,27 +3785,18 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 if (!canEdit(interaction, post)) {
-                    return interaction.reply({ ephemeral: true, content: '削除できるのは登録者または管理者のみです' });
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: '削除できるのは登録者または管理者のみです'
+                    });
                 }
 
                 const fromMine = cameFromMine(k, postId, mineState);
-                const dbCh = await getDbChannelForGuild(interaction.guild);
 
-                for (const img of (post.images ?? [])) {
-                    const msgId = typeof img === 'string' ? null : img?.msgId;
-                    if (!msgId) continue;
-                    try {
-                        const m = await dbCh.messages.fetch(msgId);
-                        await m.delete();
-                    } catch { }
-                }
+                await deletePostDb(postId);
 
-                try {
-                    const main = await dbCh.messages.fetch(postId);
-                    await main.delete();
-                } catch { }
-
-                cache.delete(postId);
+                cacheReadyByGuild.set(guildId, false);
+                await ensureCacheLoadedForGuild(interaction.guild);
 
                 const mine = mineState.get(k);
                 if (mine?.results) {
@@ -3553,12 +3817,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const st = searchState.get(k);
                 if (st?.results?.length) {
-                    if (!st.results.length) {
-                        return interaction.update({
-                            embeds: [searchPanelEmbed(st)],
-                            components: searchPanelComponents(guildId, userId, st),
-                        });
-                    }
                     return renderSearchResultList(interaction, guildId, userId, { update: true });
                 }
 
@@ -3570,41 +3828,46 @@ client.on(Events.InteractionCreate, async interaction => {
 
             // この写真削除
             if (kind === 'deletePhoto') {
-                if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-                if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
+                if (!post) {
+                    return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+                }
+                if (!canEdit(interaction, post)) {
+                    return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
+                }
 
                 const imgs = post.images ?? [];
                 const idx = Math.max(0, Math.min(imgs.length - 1, Number(extra) || 0));
                 const target = imgs[idx];
-                const msgId = (typeof target === 'string') ? null : target?.msgId;
+                const imageId = target?.id;
 
-                if (!msgId) {
-                    return interaction.reply({ ephemeral: true, content: '古い形式の写真のため、DBから削除できません（再登録が必要）' });
+                if (!imageId) {
+                    return interaction.reply({ ephemeral: true, content: '写真IDが見つかりません' });
                 }
 
-                const dbCh = await getDbChannelForGuild(interaction.guild);
-                try {
-                    const imgMsg = await dbCh.messages.fetch(msgId);
-                    await imgMsg.delete();
-                } catch {
-                    return interaction.reply({ ephemeral: true, content: 'DB側の写真メッセージ削除に失敗しました（権限/対象なし）' });
+                await deletePostImageDb(imageId);
+
+                cacheReadyByGuild.set(guildId, false);
+                await ensureCacheLoadedForGuild(interaction.guild);
+
+                const fresh = getGuildCache(guildId).get(postId);
+                if (!fresh) {
+                    return interaction.update({
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
                 }
 
-                post.images.splice(idx, 1);
-                post.updated_at = nowIso();
-
-                const dbMsg = await dbCh.messages.fetch(postId);
-                await dbMsg.edit({ embeds: [buildPostEmbedForDb(post)] });
-                cache.set(postId, post);
-
-                const urls = imageUrls(post);
-                const newIdx = Math.max(0, Math.min(idx, urls.length - 1));
+                const urls = imageUrls(fresh);
+                const newIdx = urls.length ? Math.max(0, Math.min(idx, urls.length - 1)) : 0;
                 photoView.set(k, { postId, idx: newIdx });
 
                 const embed = new EmbedBuilder()
-                    .setTitle(`🖼 写真管理: ${post.name}`)
-                    .setDescription(urls.length ? `写真 ${newIdx + 1}/${urls.length}` : '写真はありません')
-                    .setImage(urls.length ? urls[newIdx] : null);
+                    .setTitle(`🖼 写真管理: ${fresh.name}`)
+                    .setDescription(urls.length ? `写真 ${newIdx + 1}/${urls.length}` : '写真はありません');
+
+                if (urls.length) {
+                    embed.setImage(urls[newIdx]);
+                }
 
                 return interaction.update({
                     embeds: [embed],
@@ -3614,38 +3877,35 @@ client.on(Events.InteractionCreate, async interaction => {
 
             // 写真すべて削除
             if (kind === 'deleteAllPhotos') {
-                if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-                if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
-
-                const dbCh = await getDbChannelForGuild(interaction.guild);
-
-                for (const img of (post.images ?? [])) {
-                    const msgId = (typeof img === 'string') ? null : img?.msgId;
-                    if (!msgId) continue;
-                    try {
-                        const imgMsg = await dbCh.messages.fetch(msgId);
-                        await imgMsg.delete();
-                    } catch (e) {
-                        console.error('delete all photo failed:', e);
-                    }
+                if (!post) {
+                    return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+                }
+                if (!canEdit(interaction, post)) {
+                    return interaction.reply({ ephemeral: true, content: '操作できるのは登録者または管理者のみです' });
                 }
 
-                post.images = [];
-                post.updated_at = nowIso();
+                await deleteAllPostImagesDb(postId);
 
-                const dbMsg = await dbCh.messages.fetch(postId);
-                await dbMsg.edit({ embeds: [buildPostEmbedForDb(post)] });
-                cache.set(postId, post);
+                cacheReadyByGuild.set(guildId, false);
+                await ensureCacheLoadedForGuild(interaction.guild);
+
+                const fresh = getGuildCache(guildId).get(postId);
+                if (!fresh) {
+                    return interaction.update({
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+                }
 
                 photoView.set(k, { postId, idx: 0 });
 
                 const embed = new EmbedBuilder()
-                    .setTitle(`🖼 写真管理: ${post.name}`)
+                    .setTitle(`🖼 写真管理: ${fresh.name}`)
                     .setDescription('写真はありません');
 
                 return interaction.update({
                     embeds: [embed],
-                    components: photoManagerComponents(guildId, ownerId, postId, false),
+                    components: photoManagerComponents(guildId, ownerId, postId, 0),
                 });
             }
         }
@@ -3869,6 +4129,11 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             d.visited = kind === 'visited';
+
+            if (d.visited === false) {
+                d.rating = null;
+                d.visitedDate = '';
+            }
 
             draftRating.set(k, d);
             return renderCreatePanel(interaction, guildId, userId, { update: true });
@@ -4162,23 +4427,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
             }
 
-            // 店名必須
             if (!d.name || !d.name.trim()) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: 'お店の名前を入力してください'
-                });
+                return interaction.reply({ ephemeral: true, content: 'お店の名前を入力してください' });
             }
 
-            // 訪問状態必須
             if (d.visited == null) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: '訪問状態を選択してください'
-                });
+                return interaction.reply({ ephemeral: true, content: '訪問状態を選択してください' });
             }
 
-            // 「行った」のときは評価必須
             if (d.visited === true && (d.rating == null || ![1, 2, 3, 4, 5].includes(Number(d.rating)))) {
                 return interaction.reply({
                     ephemeral: true,
@@ -4188,61 +4444,23 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await interaction.deferUpdate();
 
-            const dbCh = await getDbChannelForGuild(interaction.guild);
+            const postId = await createPostInDb(interaction.guild, userId, d);
+
+            cacheReadyByGuild.set(guildId, false);
+            await ensureCacheLoadedForGuild(interaction.guild);
+
             const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
 
-            const post = {
-                id: '',
-                name: d.name.trim(),
-                visited: d.visited !== false,
-                rating: d.visited === false ? null : Number(d.rating),
-                comment: d.comment ?? '',
-                url: d.url ?? '',
-                map_url: d.mapUrl ?? '',
-                visited_date: d.visited === false ? '' : (d.visitedDate ?? ''),
-                tags: d.tags ?? [],
-                prefecture: d.prefecture ?? '',
-                images: [],
-                created_by: userId,
-                created_at: nowIso(),
-                updated_at: nowIso(),
-            };
-
-            // いったん仮IDでembed生成して送信
-            const sent = await dbCh.send({
-                embeds: [buildPostEmbedForDb({ ...post, id: 'TEMP' })],
-            });
-
-            // 本当のIDを設定
-            post.id = sent.id;
-
-            // 正しいIDでembedを更新
-            await sent.edit({
-                embeds: [buildPostEmbedForDb(post)],
-            });
-
-            // cacheへ保存
-            cache.set(post.id, post);
-
-            // 自分の記録一覧にも反映
-            const mine = mineState.get(k);
-            if (mine?.results) {
-                mine.results.unshift(post.id);
-                mineState.set(k, mine);
-            }
-
-            // 作成ドラフトは消す
             draftRating.delete(k);
             createPanelPromptRef.delete(k);
 
-            // 先に待機画面へ更新
             const waitingMsg = await interaction.editReply({
                 content: '',
                 embeds: [photoCreateWaitingEmbed(post.name)],
                 components: photoWaitingComponentsForCreate(guildId, userId),
             });
 
-            // 写真待ち状態へ
             awaitingPhoto.set(k, {
                 postId: post.id,
                 channelId: interaction.channelId,
@@ -4303,6 +4521,11 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             d.visited = kind === 'visited';
+
+            if (d.visited === false) {
+                d.rating = null;
+                d.visitedDate = '';
+            }
 
             draftRating.set(k, d);
             return renderEditPanel(interaction, guildId, userId, { update: true });
@@ -4509,6 +4732,10 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
             }
 
+            if (d.visited == null) {
+                return interaction.reply({ ephemeral: true, content: '訪問状態を選択してください' });
+            }
+
             if (d.visited === true && (d.rating == null || ![1, 2, 3, 4, 5].includes(Number(d.rating)))) {
                 return interaction.reply({
                     ephemeral: true,
@@ -4520,34 +4747,26 @@ client.on(Events.InteractionCreate, async interaction => {
             const cache = getGuildCache(guildId);
             const post = cache.get(d.postId);
             if (!post) return interaction.reply({ ephemeral: true, content: '対象データが見つかりません' });
-            if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '編集できません（投稿者のみ）' });
+            if (!canEdit(interaction, post)) {
+                return interaction.reply({ ephemeral: true, content: '操作できるのは登録者または管理者のみです' });
+            }
 
-            post.name = d.name.trim();
-            post.comment = d.comment ?? '';
-            post.url = d.url ?? '';
-            post.map_url = d.mapUrl ?? '';
-            post.tags = d.tags ?? [];
-            post.visited = d.visited !== false;
-            post.rating = d.visited === false ? null : d.rating;
-            post.visited_date = d.visited === false ? '' : (d.visitedDate ?? '');
-            post.prefecture = d.prefecture ?? '';
-            post.updated_at = nowIso();
+            await updatePostInDb(interaction.guild, userId, d);
 
-            const dbCh = await getDbChannelForGuild(interaction.guild);
-            const dbMsg = await dbCh.messages.fetch(post.id);
-            await dbMsg.edit({ embeds: [buildPostEmbedForDb(post)] });
+            cacheReadyByGuild.set(guildId, false);
+            await ensureCacheLoadedForGuild(interaction.guild);
 
-            cache.set(post.id, post);
+            const fresh = getGuildCache(guildId).get(d.postId);
 
             draftRating.delete(k);
             editPanelPromptRef.delete(k);
 
-            const nav = getDetailNavState(guildId, userId, post.id);
-            const fromMine = nav?.fromMine ?? cameFromMine(k, post.id, mineState);
+            const nav = getDetailNavState(guildId, userId, fresh.id);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, fresh.id, mineState);
             const forceHomeBack = nav?.forceHomeBack ?? false;
 
             const { detail, components } = renderDetail(interaction, {
-                post,
+                post: fresh,
                 guildId,
                 userId,
                 fromMine,
@@ -4828,6 +5047,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
+                tagFilters: [],
                 keyword: '',
                 ratingFilters: [],
                 results: [],
@@ -5081,22 +5301,14 @@ client.on(Events.InteractionCreate, async interaction => {
             if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
+            cacheReadyByGuild.set(guildId, false);
             await ensureCacheLoadedForGuild(interaction.guild);
 
-            // ここから：DB正本を必ず読み直す
-            const dbCh = await getDbChannelForGuild(interaction.guild);
-            const dbMsg = await dbCh.messages.fetch(postId);
-            const fresh = extractPostFromMessage(dbMsg);
-            if (!fresh) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-
-            // ここ追加：既存のimagesを保持
             const cache = getGuildCache(guildId);
-            const existed = cache.get(postId);
-            fresh.images = existed?.images ?? [];
+            const post = cache.get(postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
 
-            cache.set(postId, fresh);
-
-            const chunks = buildDetailEmbedsChunks(fresh, { sharedByUserId: userId });
+            const chunks = buildDetailEmbedsChunks(post, { sharedByUserId: userId });
             for (const embeds of chunks) {
                 await interaction.channel.send({ embeds });
             }
@@ -5106,13 +5318,13 @@ client.on(Events.InteractionCreate, async interaction => {
             const forceHomeBack = nav?.forceHomeBack ?? false;
 
             const { detail, components } = renderDetail(interaction, {
-                post: fresh,
+                post,
                 guildId,
                 userId,
                 fromMine,
                 total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
                 forceHomeBack,
-                notice: '📤 このチャンネルに送信しました',
+                notice: 'このチャンネルに送信しました',
             });
 
             await interaction.update({
@@ -5559,6 +5771,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 d.name = selected.name || d.name || '';
                 d.mapUrl = selected.mapUrl || d.mapUrl || '';
+                d.place = {
+                    placeId: selected.placeId,
+                    name: selected.name,
+                    address: selected.address,
+                    mapUrl: selected.mapUrl,
+                };
                 draftRating.set(k, d);
                 placeSearchState.delete(k);
 
@@ -5667,7 +5885,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     guildId,
                     userId,
                     fromMine: false,
-                    total: 1,
+                    total: searchState.get(k)?.results?.length || 1,
                     forceHomeBack: false,
                 });
 
@@ -6385,61 +6603,27 @@ client.on(Events.MessageCreate, async msg => {
         if (wait.guildId !== msg.guildId) return;
         if (wait.channelId !== msg.channelId) return;
 
-        // 複数画像を全部拾う
         const imgs = [...(msg.attachments?.values() ?? [])].filter(a => isImageAttachment(a));
         if (!imgs.length) return;
 
-        const guild = msg.guild;
-        await ensureCacheLoadedForGuild(guild);
-        const cache = getGuildCache(msg.guildId);
+        await addPostImagesDb(wait.postId, imgs);
 
+        cacheReadyByGuild.set(msg.guildId, false);
+        await ensureCacheLoadedForGuild(msg.guild);
+
+        const cache = getGuildCache(msg.guildId);
         const post = cache.get(wait.postId);
         if (!post) {
-            if (wait.interaction) {
-                try { await wait.interaction.deleteReply(); } catch { }
-            }
             awaitingPhoto.delete(k);
             return;
         }
 
-        post.images = post.images ?? [];
-
-        const dbCh = await getDbChannelForGuild(guild);
-
-        for (const att of imgs) {
-            const copied = await dbCh.send({
-                content: `__IMG__:${post.id}:${nowIso()}`,
-                files: [att.url],
-            });
-            const dbAtt = copied.attachments.first();
-            if (dbAtt) {
-                post.images.push({
-                    url: dbAtt.url,
-                    msgId: copied.id,
-                    ts: copied.createdTimestamp,
-                });
-            }
-        }
-
-        post.updated_at = nowIso();
-
-        const dbMsg = await dbCh.messages.fetch(post.id);
-        await dbMsg.edit({ embeds: [buildPostEmbedForDb(post)] });
-
-        // cache更新
-        cache.set(post.id, post);
-
-        // 写真追加後は詳細画面に戻す
         if (wait.uiMessageRef) {
             if (wait.backTo === 'home') {
-
                 await editPromptRef(wait.uiMessageRef, {
                     content: `✅ **${post.name}** に写真を追加しました`,
                     embeds: [
-                        confirmEmbed(
-                            '📄 詳細を開きますか？',
-                            `**${post.name}**`
-                        )
+                        confirmEmbed('📄 詳細を開きますか？', `**${post.name}**`)
                     ],
                     components: confirmComponents(
                         'openDetailAfterCreate',
@@ -6477,15 +6661,11 @@ client.on(Events.MessageCreate, async msg => {
                     components,
                 });
             }
-        } else if (wait.interaction) {
-            try { await wait.interaction.deleteReply(); } catch { }
         }
 
         awaitingPhoto.delete(k);
 
-        // ユーザー投稿メッセージ消す（権限必要）
         try { await msg.delete(); } catch { }
-
     } catch (e) {
         console.error(e);
     }
