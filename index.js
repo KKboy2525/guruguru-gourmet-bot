@@ -890,16 +890,6 @@ function safeText(v, max = 1000) {
     return String(v ?? '').slice(0, max);
 }
 
-function imageUrls(post) {
-    return (post.images ?? [])
-        .map(x => {
-            const url = typeof x === 'string' ? x : x?.url;
-            if (!url) return null;
-            return String(url).slice(0, 1900);
-        })
-        .filter(Boolean);
-}
-
 function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null, notice = null } = {}) {
     const lines = [];
 
