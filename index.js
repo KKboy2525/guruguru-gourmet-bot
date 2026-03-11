@@ -3721,7 +3721,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 components: photoManagerComponents(guildId, ownerId, postId, 0),
             });
         }
-    }
 
         if (id.startsWith('date:input:')) {
         const [, action, gid, ownerId, mode, postId] = id.split(':');
