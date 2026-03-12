@@ -1128,6 +1128,63 @@ async function ensureCacheLoadedForGuild(guild) {
     cacheReadyByGuild.set(guildId, true);
 }
 
+async function refreshPostCacheById(postId, guildId) {
+    if (!postId) return null;
+
+    const cache = getGuildCache(guildId);
+
+    const { data, error } = await supabase
+        .from('posts')
+        .select(`
+            id,
+            server_id,
+            user_id,
+            shop_id,
+            shop_name,
+            shop_prefecture,
+            shop_map_url,
+            shop_website_url,
+            visited,
+            rating,
+            comment,
+            visited_date,
+            visibility,
+            created_at,
+            updated_at,
+            users!posts_user_id_fkey (
+                id,
+                discord_user_id,
+                name
+            ),
+            post_images (
+                id,
+                image_url,
+                storage_path,
+                sort_order
+            ),
+            post_tags (
+                tag_id,
+                tags (
+                    id,
+                    name
+                )
+            )
+        `)
+        .eq('id', postId)
+        .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data) {
+        cache.delete(postId);
+        return null;
+    }
+
+    const post = mapDbPostToView(data);
+    cache.set(post.id, post);
+    return post;
+}
+
 async function upsertShopFromDraft(d) {
     const place = d.place ?? null;
 
@@ -3649,10 +3706,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 await deletePostImageWithStorage(target);
 
-                cacheReadyByGuild.set(guildId, false);
-                await ensureCacheLoadedForGuild(interaction.guild);
-
-                const fresh = getGuildCache(guildId).get(st.postId);
+                const fresh = await refreshPostCacheById(st.postId, guildId);
                 deletePhotoConfirmState.delete(k);
 
                 if (!fresh) {
@@ -3717,10 +3771,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 await deleteAllPostImagesWithStorage(st.postId);
 
-                cacheReadyByGuild.set(guildId, false);
-                await ensureCacheLoadedForGuild(interaction.guild);
-
-                const fresh = getGuildCache(guildId).get(st.postId);
+                const fresh = await refreshPostCacheById(st.postId, guildId);
                 deleteAllPhotosConfirmState.delete(k);
 
                 if (!fresh) {
@@ -3881,8 +3932,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 await deletePostWithImagesAndStorage(postId);
 
-                cacheReadyByGuild.set(guildId, false);
-                await ensureCacheLoadedForGuild(interaction.guild);
+                getGuildCache(guildId).delete(postId);
 
                 const mine = mineState.get(k);
                 if (mine?.results) {
@@ -4458,12 +4508,7 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.deferUpdate();
 
             const createdPost = await createPostInDb(interaction.guild, userId, d);
-
-            cacheReadyByGuild.set(guildId, false);
-            await ensureCacheLoadedForGuild(interaction.guild);
-
-            const cache = getGuildCache(guildId);
-            const post = cache.get(createdPost.id);
+            const post = await refreshPostCacheById(createdPost.id, guildId);
 
             if (!post) {
                 return interaction.editReply({
@@ -4471,6 +4516,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     embeds: [],
                     components: [],
                 });
+            }
+
+            const mine = mineState.get(k);
+            if (mine?.results) {
+                mine.results = [post.id, ...mine.results.filter(x => x !== post.id)];
+                mineState.set(k, mine);
             }
 
             draftRating.delete(k);
@@ -4785,10 +4836,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await updatePostInDb(interaction.guild, userId, d);
 
-            cacheReadyByGuild.set(guildId, false);
-            await ensureCacheLoadedForGuild(interaction.guild);
+            const fresh = await refreshPostCacheById(d.postId, guildId);
 
-            const fresh = getGuildCache(guildId).get(d.postId);
+            if (!fresh) {
+                return interaction.reply({ ephemeral: true, content: '更新後データが見つかりません' });
+            }
 
             draftRating.delete(k);
             editPanelPromptRef.delete(k);
@@ -4870,18 +4922,92 @@ client.on(Events.InteractionCreate, async interaction => {
         if (id === 'home:mine') {
             await interaction.deferUpdate();
 
-            await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
+            const currentMine = mineState.get(k);
 
-            const mine = [...cache.values()]
-                .filter(p => p.created_by === userId)
-                .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+            if (!currentMine?.results?.length) {
+                const { data: userRow, error: userErr } = await supabase
+                    .from('users')
+                    .select('id')
+                    .eq('discord_user_id', userId)
+                    .maybeSingle();
 
-            mineState.set(k, {
-                results: mine.map(p => p.id),
-                page: 0,
-                visitFilter: 'all',
-            });
+                if (userErr) {
+                    throw userErr;
+                }
+
+                if (!userRow) {
+                    mineState.set(k, {
+                        results: [],
+                        page: 0,
+                        visitFilter: 'all',
+                    });
+
+                    await renderMineList(interaction, guildId, userId, { update: true });
+                    await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                    return;
+                }
+
+                const { data, error } = await supabase
+                    .from('posts')
+                    .select(`
+                id,
+                server_id,
+                user_id,
+                shop_id,
+                shop_name,
+                shop_prefecture,
+                shop_map_url,
+                shop_website_url,
+                visited,
+                rating,
+                comment,
+                visited_date,
+                visibility,
+                created_at,
+                updated_at,
+                users!posts_user_id_fkey (
+                    id,
+                    discord_user_id,
+                    name
+                ),
+                post_images (
+                    id,
+                    image_url,
+                    storage_path,
+                    sort_order
+                ),
+                post_tags (
+                    tag_id,
+                    tags (
+                        id,
+                        name
+                    )
+                )
+            `)
+                    .eq('user_id', userRow.id)
+                    .order('created_at', { ascending: false });
+
+                if (error) {
+                    throw error;
+                }
+
+                const minePosts = (data ?? []).map(mapDbPostToView);
+
+                const cache = getGuildCache(guildId);
+                for (const post of minePosts) {
+                    cache.set(post.id, post);
+                }
+
+                mineState.set(k, {
+                    results: minePosts.map(p => p.id),
+                    page: 0,
+                    visitFilter: currentMine?.visitFilter ?? 'all',
+                });
+            } else {
+                currentMine.page = 0;
+                currentMine.visitFilter = currentMine.visitFilter ?? 'all';
+                mineState.set(k, currentMine);
+            }
 
             await renderMineList(interaction, guildId, userId, { update: true });
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
@@ -5395,17 +5521,20 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (!canEdit(interaction, post)) {
-                return interaction.reply({ ephemeral: true, content: '変更できるのは投稿者または管理者のみです' });
+                return interaction.reply({ ephemeral: true, content: '変更できるのは投稿者のみです' });
             }
+
+            const updatedAt = nowIso();
 
             const { error } = await supabase
                 .from('posts')
-                .update({ visibility: vis })
+                .update({
+                    visibility: vis,
+                    updated_at: updatedAt
+                })
                 .eq('id', postId);
 
-            if (error) {
-                throw error;
-            }
+            if (error) throw error;
 
             const d = draftRating.get(k);
             if (d && d.mode === 'edit' && d.postId === postId) {
@@ -5413,24 +5542,16 @@ client.on(Events.InteractionCreate, async interaction => {
                 draftRating.set(k, d);
             }
 
-            cacheReadyByGuild.set(guildId, false);
-            await ensureCacheLoadedForGuild(interaction.guild);
-
-            const fresh = getGuildCache(guildId).get(postId);
-            if (!fresh) {
-                return interaction.update({
-                    content: '',
-                    embeds: [homeEmbed()],
-                    components: homeComponents(),
-                });
-            }
+            post.visibility = vis;
+            post.updated_at = updatedAt;
+            cache.set(postId, post);
 
             const nav = getDetailNavState(guildId, userId, postId);
             const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
             const forceHomeBack = nav?.forceHomeBack ?? false;
 
             const { detail, components } = renderDetail(interaction, {
-                post: fresh,
+                post,
                 guildId,
                 userId,
                 fromMine,
@@ -6748,6 +6869,8 @@ client.on(Events.MessageCreate, async msg => {
                 components: [],
             });
         }
+
+        const addedImages = [];
 
         for (const img of imgs) {
             const res = await fetch(img.url);
