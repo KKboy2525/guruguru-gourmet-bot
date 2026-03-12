@@ -1179,7 +1179,6 @@ async function ensureCacheLoadedForGuild(guild, discordUserId = null) {
 
     cacheReadyByGuild.set(guildId, true);
 }
-}
 
 async function ensureServerRowByGuildId(guildId) {
     const { data, error } = await supabase
