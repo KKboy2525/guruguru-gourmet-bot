@@ -217,14 +217,27 @@ const CONFIRM_KIND = {
 async function getPostByIdForViewer(postId, guildId, viewerDiscordUserId) {
     if (!postId) return null;
 
-    await refreshPostCacheById(postId, guildId);
+    const fresh = await refreshPostCacheById(postId, guildId);
+
+    if (fresh && canViewPost(viewerDiscordUserId, guildId, fresh)) {
+        return fresh;
+    }
 
     const cache = getGuildCache(guildId);
     const cached = cache.get(postId);
-    if (cached) return cached;
+
+    if (cached && canViewPost(viewerDiscordUserId, guildId, cached)) {
+        return cached;
+    }
 
     const privatePosts = await getPrivatePostsForViewer(guildId, viewerDiscordUserId);
-    return privatePosts.find(x => x.id === postId) ?? null;
+    const mine = privatePosts.find(x => x.id === postId) ?? null;
+
+    if (mine && canViewPost(viewerDiscordUserId, guildId, mine)) {
+        return mine;
+    }
+
+    return null;
 }
 
 function nowIso() {
@@ -859,14 +872,22 @@ function visibilityLabel(v) {
     return '🖥 サーバー公開';
 }
 
-function canViewPost(userId, post) {
+function canViewPost(userId, guildId, post) {
     if (!post) return false;
 
     if (post.visibility === 'private') {
         return post.created_by === userId;
     }
 
-    return true;
+    if (post.visibility === 'server') {
+        return String(post.server_id) === String(guildId);
+    }
+
+    if (post.visibility === 'public') {
+        return true;
+    }
+
+    return false;
 }
 
 function visitFilterMatch(state, post) {
@@ -1277,7 +1298,10 @@ async function refreshPostCacheById(postId, guildId) {
 
     const post = mapDbPostToView(data);
 
-    if (post.visibility === 'private') {
+    if (
+        post.visibility === 'private' ||
+        (post.visibility === 'server' && String(post.server_id) !== String(guildId))
+    ) {
         cache.delete(postId);
         return post;
     }
@@ -5416,7 +5440,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const results = [...merged.values()]
                 .filter(p => {
-                    if (!canViewPost(userId, p)) return false;
+if (!canViewPost(userId, guildId, p)) return false;
 
                     if (st.userIdFilter?.length) {
                         if (!st.userIdFilter.includes(p.created_by)) return false;
@@ -6275,9 +6299,9 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            if (!canViewPost(userId, post)) {
-                return interaction.reply({ ephemeral: true, content: 'この投稿は表示できません' });
-            }
+if (!canViewPost(userId, guildId, post)) {
+    return interaction.reply({ ephemeral: true, content: 'この投稿は表示できません' });
+}
 
             const { detail, components } = renderDetail(interaction, {
                 post,
