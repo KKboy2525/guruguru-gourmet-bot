@@ -3,9 +3,8 @@
 
 import express from "express";
 import dotenv from "dotenv";
-import
-{ createClient }
-from '@supabase/supabase-js';
+import { createClient }
+    from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -22,10 +21,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     },
 });
 
-function mapDbPostToView(row)
-{
+function mapDbPostToView(row) {
     return {
-    id: row.id,
+        id: row.id,
         server_id: row.server_id,
         user_id: row.user_id,
         shop_id: row.shop_id,
@@ -56,7 +54,7 @@ function mapDbPostToView(row)
         images: (row.post_images ?? [])
             .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
             .map(x => ({
-        id: x.id,
+                id: x.id,
                 url: x.image_url,
                 storage_path: x.storage_path ?? null,
                 sort_order: x.sort_order ?? 0,
@@ -66,28 +64,23 @@ function mapDbPostToView(row)
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
-app.get('/', (_req, res) =>
-{
+app.get('/', (_req, res) => {
     return res.status(200).send('ok');
 });
 
-app.get('/healthcheck', (_req, res) =>
-{
+app.get('/healthcheck', (_req, res) => {
     return res.status(200).send('ok');
 });
 
-app.listen(PORT, '0.0.0.0', () =>
-{
-console.log(`Healthcheck server listening on ${ PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Healthcheck server listening on ${PORT}`);
 });
 
-process.on('unhandledRejection', (reason) =>
-{
+process.on('unhandledRejection', (reason) => {
     console.error('unhandledRejection:', reason);
 });
 
-import
-{
+import {
     Client,
     GatewayIntentBits,
     Partials,
@@ -106,10 +99,10 @@ import
     EmbedBuilder,
     Events,
 }
-from 'discord.js';
+    from 'discord.js';
 
 console.log('ENV CHECK', {
-tokenLen: (process.env.DISCORD_TOKEN || '').length,
+    tokenLen: (process.env.DISCORD_TOKEN || '').length,
     dbName: process.env.DB_CHANNEL_NAME,
 });
 
@@ -178,8 +171,14 @@ const awaitingPhoto = new Map();
 // { postId, idx }
 const photoView = new Map();
 
+// 写真削除確認の一時状態 key: guildId:userId -> { postId, idx }
+const deletePhotoConfirmState = new Map();
+
 // 詳細画面の戻り先状態 key: guildId:userId -> { postId, fromMine, forceHomeBack }
 const detailNavState = new Map();
+
+// 作成後に詳細を開くか確認する一時状態 key: guildId:userId -> { postId }
+const openDetailAfterCreateState = new Map();
 
 // 検索キーワードモーダルを閉じたあと元の検索パネルを更新するため
 // key: guildId:userId -> { webhook, messageId }
@@ -212,13 +211,11 @@ const CONFIRM_KIND = {
 };
 
 // ====== util ======
-function nowIso()
-{
+function nowIso() {
     return new Date().toISOString();
 }
 
-async function deleteImageFileFromStorage(storagePath)
-{
+async function deleteImageFileFromStorage(storagePath) {
     if (!storagePath) return;
 
     const normalized = String(storagePath).replace(/^\/+/, '')
@@ -227,18 +224,15 @@ async function deleteImageFileFromStorage(storagePath)
         .from('post-images')
         .remove([normalized]);
 
-if (error) throw error;
+    if (error) throw error;
 }
 
-async function deletePostImageWithStorage(imageRow)
-{
-    if (!imageRow?.id)
-    {
+async function deletePostImageWithStorage(imageRow) {
+    if (!imageRow?.id) {
         throw new Error('image id is required');
     }
 
-    if (imageRow.storage_path)
-    {
+    if (imageRow.storage_path) {
         await deleteImageFileFromStorage(imageRow.storage_path);
     }
 
@@ -250,8 +244,7 @@ async function deletePostImageWithStorage(imageRow)
     if (error) throw error;
 }
 
-async function deleteAllPostImagesWithStorage(postId)
-{
+async function deleteAllPostImagesWithStorage(postId) {
     const { data, error } = await supabase
         .from('post_images')
         .select('id, storage_path')
@@ -264,8 +257,7 @@ async function deleteAllPostImagesWithStorage(postId)
         .filter(Boolean)
         .map(x => String(x).replace(/ ^\/ +/, ''));
 
-    if (paths.length)
-    {
+    if (paths.length) {
         const { error: storageError } = await supabase.storage
             .from('post-images')
             .remove(paths);
@@ -281,8 +273,7 @@ async function deleteAllPostImagesWithStorage(postId)
     if (deleteError) throw deleteError;
 }
 
-async function deletePostWithImagesAndStorage(postId)
-{
+async function deletePostWithImagesAndStorage(postId) {
     const { data: images, error: imageErr } = await supabase
         .from('post_images')
         .select('id, storage_path')
@@ -295,8 +286,7 @@ async function deletePostWithImagesAndStorage(postId)
         .filter(Boolean)
         .map(x => String(x).replace(/ ^\/ +/, ''));
 
-    if (paths.length)
-    {
+    if (paths.length) {
         const { error: storageError } = await supabase.storage
             .from('post-images')
             .remove(paths);
@@ -319,8 +309,7 @@ async function deletePostWithImagesAndStorage(postId)
     if (deletePostErr) throw deletePostErr;
 }
 
-async function deletePostDb(postId)
-{
+async function deletePostDb(postId) {
     const { error: imgErr } = await supabase
         .from('post_images')
         .delete()
@@ -340,8 +329,7 @@ async function deletePostDb(postId)
     if (postErr) throw postErr;
 }
 
-async function updatePostInDb(guild, discordUserId, d)
-{
+async function updatePostInDb(guild, discordUserId, d) {
     const serverRow = await ensureServerRow(guild);
     const userRow = await ensureUserRow(discordUserId, guild);
     const shopRow = await upsertShopFromDraft(d);
@@ -362,18 +350,17 @@ async function updatePostInDb(guild, discordUserId, d)
         visited_date: d.visited === false ? null : normalizeDateForDb(d.visitedDate),
     };
 
-const { error } = await supabase
-    .from('posts')
-    .update(payload)
-    .eq('id', d.postId);
+    const { error } = await supabase
+        .from('posts')
+        .update(payload)
+        .eq('id', d.postId);
 
-if (error) throw error;
+    if (error) throw error;
 
-await replacePostTagsDb(d.postId, d.tags ?? []);
+    await replacePostTagsDb(d.postId, d.tags ?? []);
 }
 
-async function createPostInDb(guild, discordUserId, d)
-{
+async function createPostInDb(guild, discordUserId, d) {
     const serverRow = await ensureServerRow(guild);
     const userRow = await ensureUserRow(discordUserId, guild);
     const shopRow = await upsertShopFromDraft(d);
@@ -432,8 +419,7 @@ async function createPostInDb(guild, discordUserId, d)
     return data;
 }
 
-async function replacePostTagsDb(postId, tags = [])
-{
+async function replacePostTagsDb(postId, tags = []) {
     const normalized = uniqueStrings(tags);
 
     const { error: delErr } = await supabase
@@ -447,8 +433,7 @@ async function replacePostTagsDb(postId, tags = [])
     const tagMap = await ensureTagRows(normalized);
 
     const rows = normalized
-        .map(name =>
-        {
+        .map(name => {
             const tagId = tagMap.get(name);
             if (!tagId) return null;
             return { post_id: postId, tag_id: tagId };
@@ -462,8 +447,7 @@ async function replacePostTagsDb(postId, tags = [])
     if (insErr) throw insErr;
 }
 
-async function addPostImagesDb(guildId, postId, files = [])
-{
+async function addPostImagesDb(guildId, postId, files = []) {
     const rows = [];
 
     const { data: existing, error: existingErr } = await supabase
@@ -543,27 +527,23 @@ async function uploadPostImageToStorage({
     };
 }
 
-async function fetchImageAsBuffer(url)
-{
+async function fetchImageAsBuffer(url) {
     const res = await fetch(url);
-    if (!res.ok)
-    {
-        throw new Error(`画像取得失敗: ${ res.status } ${ url}`);
+    if (!res.ok) {
+        throw new Error(`画像取得失敗: ${res.status} ${url}`);
     }
 
     const arrayBuffer = await res.arrayBuffer();
-return Buffer.from(arrayBuffer);
+    return Buffer.from(arrayBuffer);
 }
 
-function normalizeDateForDb(s)
-{
+function normalizeDateForDb(s) {
     const v = normalizeVisitedDate(s);
     if (!v) return null;
     return v.replace(/\//g, '-');
 }
 
-function uniqueStrings(arr = [])
-{
+function uniqueStrings(arr = []) {
     return [...new Set(
         arr
             .map(x => String(x ?? '').trim())
@@ -571,16 +551,14 @@ function uniqueStrings(arr = [])
     )];
 }
 
-function visibilityToDb(_post)
-{
+function visibilityToDb(_post) {
     return 'server';
 }
 
-function formatJst(date)
-{
+function formatJst(date) {
     if (!date) return '';
     return new Date(date).toLocaleString('ja-JP', {
-    timeZone: 'Asia/Tokyo',
+        timeZone: 'Asia/Tokyo',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -590,7 +568,7 @@ function formatJst(date)
     });
 }
 
-function setDetailNavState(guildId, userId, postId, { fromMine = false, forceHomeBack = false } = { }) {
+function setDetailNavState(guildId, userId, postId, { fromMine = false, forceHomeBack = false } = {}) {
     const k = keyOf(guildId, userId);
     detailNavState.set(k, {
         postId,
@@ -599,205 +577,176 @@ function setDetailNavState(guildId, userId, postId, { fromMine = false, forceHom
     });
 }
 
-function getDetailNavState(guildId, userId, postId)
-{
+function getDetailNavState(guildId, userId, postId) {
     const k = keyOf(guildId, userId);
     const st = detailNavState.get(k);
     if (st && st.postId === postId) return st;
     return null;
 }
 
-async function blankCurrentMessage(interaction)
-{
-    try
-    {
+async function blankCurrentMessage(interaction) {
+    try {
         if (!interaction?.message?.id) return;
         await interaction.webhook.deleteMessage(interaction.message.id);
     }
-    catch (e)
-    {
+    catch (e) {
         console.error('blankCurrentMessage failed:', e);
     }
 }
 
-async function blankMessageById(interaction, messageId)
-{
-    try
-    {
+async function blankMessageById(interaction, messageId) {
+    try {
         if (!messageId) return;
         await interaction.webhook.deleteMessage(messageId);
     }
-    catch (e)
-    {
+    catch (e) {
         console.error('blankMessageById failed:', e);
     }
 }
 
-async function blankPromptRef(ref)
-{
-    try
-    {
+async function blankPromptRef(ref) {
+    try {
         if (!ref?.webhook || !ref?.messageId) return;
         await ref.webhook.deleteMessage(ref.messageId);
     }
-    catch (e)
-    {
+    catch (e) {
         console.error('blankPromptRef failed:', e);
     }
 }
 
-async function editPromptRef(ref, payload)
-{
-    try
-    {
+async function editPromptRef(ref, payload) {
+    try {
         if (!ref?.webhook || !ref?.messageId) return false;
         await ref.webhook.editMessage(ref.messageId, payload);
         return true;
     }
-    catch (e)
-    {
+    catch (e) {
         console.error('editPromptRef failed:', e);
         return false;
     }
 }
 
-async function deletePromptRef(ref)
-{
-    try
-    {
+async function deletePromptRef(ref) {
+    try {
         if (!ref?.webhook || !ref?.messageId) return true;
         await ref.webhook.deleteMessage(ref.messageId);
         return true;
     }
-    catch (e)
-    {
+    catch (e) {
         console.error('deletePromptRef failed:', e);
         return false;
     }
 }
 
-async function clearEphemeralMessage(interaction)
-{
-    try
-    {
-        if (interaction?.message?.id)
-        {
+async function clearEphemeralMessage(interaction) {
+    try {
+        if (interaction?.message?.id) {
             await interaction.webhook.deleteMessage(interaction.message.id);
         }
     }
     catch { }
 }
 
-function tagEntryChoiceComponents(mode, guildId, userId)
-{
+function tagEntryChoiceComponents(mode, guildId, userId) {
     return [
         new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId(`${ mode}:tagsExisting:${ guildId}:${ userId}`)
+                .setCustomId(`${mode}:tagsExisting:${guildId}:${userId}`)
                 .setLabel('既存タグから選ぶ')
                 .setStyle(ButtonStyle.Secondary),
 
             new ButtonBuilder()
-                .setCustomId(`${mode}:tagsNew:${ guildId}:${ userId}`)
+                .setCustomId(`${mode}:tagsNew:${guildId}:${userId}`)
                 .setLabel('新規追加')
                 .setStyle(ButtonStyle.Primary),
 
             new ButtonBuilder()
-                .setCustomId(`${mode}:panelBack:${ guildId}:${ userId}`)
+                .setCustomId(`${mode}:panelBack:${guildId}:${userId}`)
                 .setLabel('戻る')
                 .setStyle(ButtonStyle.Secondary),
         ),
     ];
 }
 
-function tagPickComponents(mode, guildId, userId, cache, selectedTags = [], page = 0)
-{
+function tagPickComponents(mode, guildId, userId, cache, selectedTags = [], page = 0) {
     const { p, totalPages, slice } = tagSlice(cache, page);
 
     const options = (slice.length ? slice : ['(タグなし)']).map(x => ({
-    label: x,
+        label: x,
         value: x,
         default: selectedTags.includes(x),
     }));
 
-const select = new StringSelectMenuBuilder()
-    .setCustomId(`${mode}:tagPick:${ guildId}:${ userId}:${ p}`)
-        .setPlaceholder(`タグを選択してください（複数可） ${ p + 1}/${ totalPages}`)
+    const select = new StringSelectMenuBuilder()
+        .setCustomId(`${mode}:tagPick:${guildId}:${userId}:${p}`)
+        .setPlaceholder(`タグを選択してください（複数可） ${p + 1}/${totalPages}`)
         .setMinValues(0)
         .setMaxValues(Math.max(1, options.length))
         .addOptions(options);
 
-return [
-    new ActionRowBuilder().addComponents(select),
-    new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`${ mode}:tagPagePrev:${ guildId}:${ userId}:${ p}`)
+    return [
+        new ActionRowBuilder().addComponents(select),
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`${mode}:tagPagePrev:${guildId}:${userId}:${p}`)
                 .setLabel('◀ 前へ')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(p <= 0),
 
             new ButtonBuilder()
-                .setCustomId(`${mode}:tagPageNext:${ guildId}:${ userId}:${ p}`)
+                .setCustomId(`${mode}:tagPageNext:${guildId}:${userId}:${p}`)
                 .setLabel('次へ ▶')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(p >= totalPages - 1),
 
             new ButtonBuilder()
-                .setCustomId(`${mode}:tagClear:${ guildId}:${ userId}`)
+                .setCustomId(`${mode}:tagClear:${guildId}:${userId}`)
                 .setLabel('解除')
                 .setStyle(ButtonStyle.Secondary),
 
             new ButtonBuilder()
-                .setCustomId(`${mode}:tagChoiceBack:${ guildId}:${ userId}`)
+                .setCustomId(`${mode}:tagChoiceBack:${guildId}:${userId}`)
                 .setLabel('戻る')
                 .setStyle(ButtonStyle.Secondary),
         ),
     ];
 }
 
-function addUiMessageId(guildId, userId, messageId)
-{
+function addUiMessageId(guildId, userId, messageId) {
     const k = keyOf(guildId, userId);
     if (!uiMessages.has(k)) uiMessages.set(k, new Set());
     uiMessages.get(k).add(messageId);
 }
 
-async function rememberUiReply(interaction, guildId, userId)
-{
-    try
-    {
+async function rememberUiReply(interaction, guildId, userId) {
+    try {
         const msg = await interaction.fetchReply();
         if (msg?.id) addUiMessageId(guildId, userId, msg.id);
         return msg;
     }
-    catch
-    {
+    catch {
         return null;
     }
 }
 
-async function clearOtherUiMessages(interaction, guildId, userId, keepMessageId = null)
-{
+async function clearOtherUiMessages(interaction, guildId, userId, keepMessageId = null) {
     const k = keyOf(guildId, userId);
     const ids = [...(uiMessages.get(k) ?? new Set())];
 
     for (const mid of ids) {
-    if (keepMessageId && mid === keepMessageId) continue;
-    try
-    {
-        await interaction.webhook.deleteMessage(mid);
+        if (keepMessageId && mid === keepMessageId) continue;
+        try {
+            await interaction.webhook.deleteMessage(mid);
+        }
+        catch { }
     }
-    catch { }
-}
 
-if (keepMessageId)
-{
-    uiMessages.set(k, new Set([keepMessageId]));
-}
-else
-{
-    uiMessages.delete(k);
-}
+    if (keepMessageId) {
+        uiMessages.set(k, new Set([keepMessageId]));
+    }
+    else {
+        uiMessages.delete(k);
+    }
 }
 
 function imageUrls(post) {
@@ -809,18 +758,16 @@ function imageUrls(post) {
 }
 
 
-function buildDetailEmbedsChunks(post, { sharedByUserId = null } = { }) {
+function buildDetailEmbedsChunks(post, { sharedByUserId = null } = {}) {
     const top = [];
 
     top.push(visitLabel(post));
 
-    if (post.visited !== false)
-    {
+    if (post.visited !== false) {
         top.push(hasRating(post) ? stars(post.rating) : '評価なし');
     }
 
-    if (post.comment)
-    {
+    if (post.comment) {
         top.push('');
         top.push(safeText(post.comment, 1500));
     }
@@ -828,31 +775,30 @@ function buildDetailEmbedsChunks(post, { sharedByUserId = null } = { }) {
     const body = [
         ...top,
         '',
-        `🗾 ${ safeText(post.prefecture || '(未設定)', 100)}`,
-        ...(post.visited !== false && post.visited_date?[`📅 ${ safeText(post.visited_date, 20)}`] : []),
-        `🏷 ${ safeText(tagString(post.tags), 500)}`,
-        `👤 登録者 <@${ post.created_by}>`,
-        ...(sharedByUserId?[`📤 共有 <@${ sharedByUserId}>`] : []),
+        `🗾 ${safeText(post.prefecture || '(未設定)', 100)}`,
+        ...(post.visited !== false && post.visited_date ? [`📅 ${safeText(post.visited_date, 20)}`] : []),
+        `🏷 ${safeText(tagString(post.tags), 500)}`,
+        `👤 登録者 <@${post.created_by}>`,
+        ...(sharedByUserId ? [`📤 共有 <@${sharedByUserId}>`] : []),
     ].join('\n');
 
     const info = new EmbedBuilder()
-        .setTitle(`🍽 ${ safeText(post.name || '(名称不明)', 200)}`)
+        .setTitle(`🍽 ${safeText(post.name || '(名称不明)', 200)}`)
         .setDescription(safeText(body, 4000))
         .addFields(
             { name: '🔗 Webサイト', value: safeText(post.url || '(なし)', 1000) },
             { name: '📍 場所', value: safeText(post.map_url || '(なし)', 1000) }
         );
 
-    if (post.updated_at)
-    {
-        info.setFooter({ text: safeText(`更新: ${ formatJst(post.updated_at)}`, 200) });
+    if (post.updated_at) {
+        info.setFooter({ text: safeText(`更新: ${formatJst(post.updated_at)}`, 200) });
     }
 
     const images = imageUrls(post);
 
     const imageEmbeds = images.map((url, i) =>
         new EmbedBuilder()
-            .setTitle(`📷 写真 ${ i + 1}/${ images.length}`)
+            .setTitle(`📷 写真 ${i + 1}/${images.length}`)
             .setImage(url)
     );
 
@@ -860,8 +806,7 @@ function buildDetailEmbedsChunks(post, { sharedByUserId = null } = { }) {
     chunks.push([info, ...imageEmbeds.slice(0, 9)]);
 
     let i = 9;
-    while (i < imageEmbeds.length)
-    {
+    while (i < imageEmbeds.length) {
         chunks.push(imageEmbeds.slice(i, i + 10));
         i += 10;
     }
@@ -869,35 +814,29 @@ function buildDetailEmbedsChunks(post, { sharedByUserId = null } = { }) {
     return chunks;
 }
 
-function keyOf(guildId, userId)
-{
-    return `${ guildId}:${ userId}`;
+function keyOf(guildId, userId) {
+    return `${guildId}:${userId}`;
 }
 
-function getGuildCache(guildId)
-{
+function getGuildCache(guildId) {
     if (!cacheByGuild.has(guildId)) cacheByGuild.set(guildId, new Map());
     return cacheByGuild.get(guildId);
 }
 
-function stars(rating)
-{
+function stars(rating) {
     const r = Math.max(1, Math.min(5, Number(rating) || 1));
     return '⭐'.repeat(r) + '☆'.repeat(5 - r);
 }
 
-function visitLabel(post)
-{
+function visitLabel(post) {
     return post?.visited === false ? '📝 行きたい' : '✅ 行った';
 }
 
-function hasRating(post)
-{
+function hasRating(post) {
     return post?.visited !== false && post?.rating != null;
 }
 
-function visitFilterMatch(state, post)
-{
+function visitFilterMatch(state, post) {
     const filter = state?.visitFilter ?? 'all';
 
     if (filter === 'visited') return post.visited !== false;
@@ -933,17 +872,15 @@ function normalizeVisitedDate(raw) {
     return `${y}/${mm}/${dd}`;
 }
 
-function todayYMD()
-{
+function todayYMD() {
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    return `${ y}/${ m}/${ day}`;
+    return `${y}/${m}/${day}`;
 }
 
-function parseTags(raw)
-{
+function parseTags(raw) {
     const arr = (raw ?? '')
         .split(',')
         .map(s => s.trim())
@@ -954,24 +891,21 @@ function parseTags(raw)
     const seen = new Set();
     const out = [];
     for (const t of arr) {
-    const k = t.toLowerCase();
-    if (!seen.has(k))
-    {
-        seen.add(k);
+        const k = t.toLowerCase();
+        if (!seen.has(k)) {
+            seen.add(k);
             out.push(t);
+        }
     }
-}
-return out;
+    return out;
 }
 
-function tagString(tags)
-{
+function tagString(tags) {
     if (!tags?.length) return '(なし)';
     return tags.map(t => `#${t}`).join(' ');
 }
 
-function isImageAttachment(att)
-{
+function isImageAttachment(att) {
     const ct = att.contentType || '';
     if (ct.startsWith('image/')) return true;
     const name = (att.name || '').toLowerCase();
@@ -984,54 +918,47 @@ function isImageAttachment(att)
     );
 }
 
-function safeText(v, max = 1000)
-{
+function safeText(v, max = 1000) {
     return String(v ?? '').slice(0, max);
 }
 
-function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null, notice = null } = { }) {
+function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null, notice = null } = {}) {
     const lines = [];
 
-    if (notice)
-    {
-        lines.push(`📤 ${ safeText(notice, 200)}`);
+    if (notice) {
+        lines.push(`📤 ${safeText(notice, 200)}`);
         lines.push('');
     }
 
     lines.push(visitLabel(post));
 
-    if (hasRating(post))
-    {
+    if (hasRating(post)) {
         lines.push(stars(post.rating));
         lines.push('');
     }
 
-    if (post.comment)
-    {
+    if (post.comment) {
         lines.push(safeText(post.comment, 1500));
         lines.push('');
     }
 
-    lines.push(`🗾 ${ safeText(post.prefecture || '(未設定)', 100)}`);
+    lines.push(`🗾 ${safeText(post.prefecture || '(未設定)', 100)}`);
 
-    if (post.visited !== false && post.visited_date)
-    {
-        lines.push(`📅 ${ safeText(post.visited_date, 20)}`);
+    if (post.visited !== false && post.visited_date) {
+        lines.push(`📅 ${safeText(post.visited_date, 20)}`);
     }
 
-    lines.push(`🏷 ${ safeText(tagString(post.tags), 500)}`);
-    lines.push(`👤 登録者 <@${ post.created_by}>`);
+    lines.push(`🏷 ${safeText(tagString(post.tags), 500)}`);
+    lines.push(`👤 登録者 <@${post.created_by}>`);
 
-    if (sharedByUserId)
-    {
-        lines.push(`📤 共有 <@${ sharedByUserId}>`);
+    if (sharedByUserId) {
+        lines.push(`📤 共有 <@${sharedByUserId}>`);
     }
 
     const urls = imageUrls(post);
-    if (urls.length)
-    {
+    if (urls.length) {
         const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
-        lines.push(`📷 写真 ${ idx + 1}/${ urls.length}`);
+        lines.push(`📷 写真 ${idx + 1}/${urls.length}`);
     }
 
     const fields = [
@@ -1040,17 +967,15 @@ function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null,
     ];
 
     const e = new EmbedBuilder()
-        .setTitle(`🍽 ${ safeText(post.name || '(名称不明)', 200)}`)
+        .setTitle(`🍽 ${safeText(post.name || '(名称不明)', 200)}`)
         .setDescription(safeText(lines.join('\n'), 4000))
         .addFields(fields);
 
-    if (post.updated_at)
-    {
-        e.setFooter({ text: safeText(`更新: ${ formatJst(post.updated_at)}`, 200) });
+    if (post.updated_at) {
+        e.setFooter({ text: safeText(`更新: ${formatJst(post.updated_at)}`, 200) });
     }
 
-    if (urls.length)
-    {
+    if (urls.length) {
         const idx = Math.max(0, Math.min(urls.length - 1, Number(imageIndex) || 0));
         e.setImage(urls[idx]);
     }
@@ -1059,49 +984,43 @@ function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null,
 }
 
 // 自分の記録一覧（カード）
-function buildCardEmbed(post)
-{
+function buildCardEmbed(post) {
     const lines = [visitLabel(post)];
 
-    if (hasRating(post))
-    {
+    if (hasRating(post)) {
         lines.push(stars(post.rating));
     }
 
-    lines.push(`🗾 ${ post.prefecture? post.prefecture: '(未設定)'}`);
+    lines.push(`🗾 ${post.prefecture ? post.prefecture : '(未設定)'}`);
 
-if (post.visited !== false && post.visited_date)
-{
-    lines.push(`📅 ${ post.visited_date}`);
-}
+    if (post.visited !== false && post.visited_date) {
+        lines.push(`📅 ${post.visited_date}`);
+    }
 
-lines.push(`🏷 ${ tagString(post.tags)}`);
+    lines.push(`🏷 ${tagString(post.tags)}`);
 
-const e = new EmbedBuilder()
-    .setTitle(`🍽 ${post.name}`)
+    const e = new EmbedBuilder()
+        .setTitle(`🍽 ${post.name}`)
         .setDescription(lines.join('\n'));
 
-const urls = imageUrls(post);
-const thumb = urls.length ? urls[urls.length - 1] : null;
-if (thumb) e.setThumbnail(thumb);
+    const urls = imageUrls(post);
+    const thumb = urls.length ? urls[urls.length - 1] : null;
+    if (thumb) e.setThumbnail(thumb);
 
-return e;
+    return e;
 }
 
-function buildSearchCardEmbed(post)
-{
+function buildSearchCardEmbed(post) {
     const lines = [visitLabel(post)];
 
-    if (hasRating(post))
-    {
+    if (hasRating(post)) {
         lines.push(stars(post.rating));
     }
 
-    lines.push(`🗾 ${ post.prefecture? post.prefecture: '(未設定)'}`);
+    lines.push(`🗾 ${post.prefecture ? post.prefecture : '(未設定)'}`);
 
-if (post.visited !== false && post.visited_date)
-{
-    lines.push(`📅 ${post.visited_date}`);
+    if (post.visited !== false && post.visited_date) {
+        lines.push(`📅 ${post.visited_date}`);
     }
 
     lines.push(`🏷 ${tagString(post.tags)}`);
@@ -1900,6 +1819,38 @@ function photoWaitingComponents(guildId, userId) {
             new ButtonBuilder()
                 .setCustomId(`photo:skip:${guildId}:${userId}`)
                 .setLabel('送信しない')
+                .setStyle(ButtonStyle.Secondary)
+        )
+    ];
+}
+
+function deletePhotoConfirmComponents(guildId, userId) {
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`confirm:yes:dp:${guildId}:${userId}`)
+                .setLabel('はい')
+                .setStyle(ButtonStyle.Danger),
+
+            new ButtonBuilder()
+                .setCustomId(`confirm:no:dp:${guildId}:${userId}`)
+                .setLabel('いいえ')
+                .setStyle(ButtonStyle.Secondary)
+        )
+    ];
+}
+
+function openDetailAfterCreateComponents(guildId, userId) {
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`confirm:yes:od:${guildId}:${userId}`)
+                .setLabel('はい')
+                .setStyle(ButtonStyle.Primary),
+
+            new ButtonBuilder()
+                .setCustomId(`confirm:no:od:${guildId}:${userId}`)
+                .setLabel('いいえ')
                 .setStyle(ButtonStyle.Secondary)
         )
     ];
@@ -3371,34 +3322,16 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 // 新規登録後なら詳細を開くか確認
                 if (wait.backTo === 'home' && wait.postId) {
-                    await ensureCacheLoadedForGuild(interaction.guild);
-                    const cache = getGuildCache(guildId);
-                    const post = cache.get(wait.postId);
-
-                    if (post) {
-                        const { detail, components } = renderDetail(interaction, {
-                            post,
-                            guildId,
-                            userId,
-                            fromMine: false,
-                            total: 1,
-                            forceHomeBack: true,
-                        });
-
-                        await interaction.update({
-                            content: '',
-                            embeds: [detail],
-                            components,
-                        });
-
-                        uiMessages.set(k, new Set([interaction.message.id]));
-                        return;
-                    }
+                    openDetailAfterCreateState.set(k, { postId: wait.postId });
 
                     await interaction.update({
                         content: '',
-                        embeds: [homeEmbed()],
-                        components: homeComponents(),
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle('✅ 登録完了')
+                                .setDescription('詳細画面を開きますか？')
+                        ],
+                        components: openDetailAfterCreateComponents(guildId, userId),
                     });
 
                     uiMessages.set(k, new Set([interaction.message.id]));
@@ -3588,9 +3521,14 @@ client.on(Events.InteractionCreate, async interaction => {
             const cache = getGuildCache(guildId);
             const post = cache.get(postId);
 
-            if (kind === 'openDetailAfterCreate') {
-                if (!post) {
+            if (kind === 'dp') {
+                const st = deletePhotoConfirmState.get(k);
+
+                if (answer === 'no' || !st?.postId) {
+                    deletePhotoConfirmState.delete(k);
+
                     await interaction.update({
+                        content: '',
                         embeds: [homeEmbed()],
                         components: homeComponents(),
                     });
@@ -3598,30 +3536,115 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
-                if (answer === 'yes') {
-                    const { detail, components } = renderDetail(interaction, {
-                        post,
-                        guildId,
-                        userId,
-                        fromMine: false,
-                        total: 1,
-                        forceHomeBack: true,
-                    });
+                const targetPost = cache.get(st.postId);
+                if (!targetPost) {
+                    deletePhotoConfirmState.delete(k);
 
                     await interaction.update({
                         content: '',
-                        embeds: [detail],
-                        components,
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
                     });
                     uiMessages.set(k, new Set([interaction.message.id]));
                     return;
                 }
 
+                if (!canEdit(interaction, targetPost)) {
+                    return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
+                }
+
+                const imgs = targetPost.images ?? [];
+                if (!imgs.length) {
+                    deletePhotoConfirmState.delete(k);
+                    return interaction.reply({ ephemeral: true, content: '写真がありません' });
+                }
+
+                const idx = Math.max(0, Math.min(imgs.length - 1, Number(st.idx) || 0));
+                const target = imgs[idx];
+
+                if (!target?.id) {
+                    deletePhotoConfirmState.delete(k);
+                    return interaction.reply({ ephemeral: true, content: '写真IDが見つかりません' });
+                }
+
+                await deletePostImageWithStorage(target);
+
+                cacheReadyByGuild.set(guildId, false);
+                await ensureCacheLoadedForGuild(interaction.guild);
+
+                const fresh = getGuildCache(guildId).get(st.postId);
+                deletePhotoConfirmState.delete(k);
+
+                if (!fresh) {
+                    return interaction.update({
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+                }
+
+                const urls2 = imageUrls(fresh);
+                const newIdx = Math.max(0, Math.min(idx, urls2.length - 1));
+                photoView.set(k, { postId: st.postId, idx: newIdx });
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`🖼 写真管理: ${safeText(fresh.name || '(名称不明)', 200)}`)
+                    .setDescription(urls2.length ? `写真 ${newIdx + 1}/${urls2.length}` : '写真はありません');
+
+                if (urls2.length && urls2[newIdx]) {
+                    embed.setImage(urls2[newIdx]);
+                }
+
+                return interaction.update({
+                    embeds: [embed],
+                    components: photoManagerComponents(guildId, ownerId, st.postId, urls2.length),
+                });
+            }
+
+            if (kind === 'od') {
+                const st = openDetailAfterCreateState.get(k);
+
+                if (answer === 'no' || !st?.postId) {
+                    openDetailAfterCreateState.delete(k);
+
+                    await interaction.update({
+                        content: '',
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+
+                    uiMessages.set(k, new Set([interaction.message.id]));
+                    return;
+                }
+
+                const targetPost = cache.get(st.postId);
+                openDetailAfterCreateState.delete(k);
+
+                if (!targetPost) {
+                    await interaction.update({
+                        content: '',
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+
+                    uiMessages.set(k, new Set([interaction.message.id]));
+                    return;
+                }
+
+                const { detail, components } = renderDetail(interaction, {
+                    post: targetPost,
+                    guildId,
+                    userId,
+                    fromMine: false,
+                    total: 1,
+                    forceHomeBack: true,
+                });
+
                 await interaction.update({
                     content: '',
-                    embeds: [homeEmbed()],
-                    components: homeComponents(),
+                    embeds: [detail],
+                    components,
                 });
+
                 uiMessages.set(k, new Set([interaction.message.id]));
                 return;
             }
@@ -3775,64 +3798,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            if (kind === 'deletePhoto') {
-                if (!post) {
-                    return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-                }
-                if (!canEdit(interaction, post)) {
-                    return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
-                }
-
-                const imgs = post.images ?? [];
-                if (!imgs.length) {
-                    return interaction.reply({
-                        ephemeral: true,
-                        content: '写真がありません'
-                    });
-                }
-
-                const idxRaw = Number(extra);
-                const idx = Number.isInteger(idxRaw)
-                    ? Math.max(0, Math.min(imgs.length - 1, idxRaw))
-                    : 0;
-
-                const target = imgs[idx];
-
-                if (!target?.id) {
-                    return interaction.reply({ ephemeral: true, content: '写真IDが見つかりません' });
-                }
-
-                await deletePostImageWithStorage(target);
-
-                cacheReadyByGuild.set(guildId, false);
-                await ensureCacheLoadedForGuild(interaction.guild);
-
-                const fresh = getGuildCache(guildId).get(postId);
-                if (!fresh) {
-                    return interaction.update({
-                        embeds: [homeEmbed()],
-                        components: homeComponents(),
-                    });
-                }
-
-                const urls2 = imageUrls(fresh);
-                const newIdx = Math.max(0, Math.min(idx, urls2.length - 1));
-                photoView.set(k, { postId, idx: newIdx });
-
-                const embed = new EmbedBuilder()
-                    .setTitle(`🖼 写真管理: ${safeText(fresh.name || '(名称不明)', 200)}`)
-                    .setDescription(urls2.length ? `写真 ${newIdx + 1}/${urls2.length}` : '写真はありません');
-
-                if (urls2.length && urls2[newIdx]) {
-                    embed.setImage(urls2[newIdx]);
-                }
-
-                return interaction.update({
-                    embeds: [embed],
-                    components: photoManagerComponents(guildId, ownerId, postId, urls2.length),
-                });
-            }
-
             if (kind === 'deleteAllPhotos') {
                 if (!post) {
                     return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
@@ -3874,1821 +3839,146 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (id.startsWith('date:input:')) {
-        const [, action, gid, ownerId, mode, postId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            const [, action, gid, ownerId, mode, postId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-        const d = draftRating.get(k);
-        if (!d || d.mode !== mode) {
-            return interaction.reply({ ephemeral: true, content: '途中状態がありません最初からやり直してください' });
+            const d = draftRating.get(k);
+            if (!d || d.mode !== mode) {
+                return interaction.reply({ ephemeral: true, content: '途中状態がありません最初からやり直してください' });
+            }
+
+            const currentValue = d.visitedDate ?? '';
+
+            return interaction.showModal(
+                buildVisitedDateModal(gid, ownerId, mode, postId || '', currentValue)
+            );
         }
 
-        const currentValue = d.visitedDate ?? '';
+        if (id.startsWith('search:prefPagePrev:') || id.startsWith('search:prefPageNext:')) {
+            const parts = id.split(':');
+            const gid = parts[2];
+            const ownerId = parts[3];
+            const page = Number(parts[4] || 0);
 
-        return interaction.showModal(
-            buildVisitedDateModal(gid, ownerId, mode, postId || '', currentValue)
-        );
-    }
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-    if (id.startsWith('search:prefPagePrev:') || id.startsWith('search:prefPageNext:')) {
-        const parts = id.split(':');
-        const gid = parts[2];
-        const ownerId = parts[3];
-        const page = Number(parts[4] || 0);
+            const next = id.includes('prefPageNext') ? page + 1 : page - 1;
+            const { p, totalPages, slice } = prefSlice(next);
 
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
 
-        const next = id.includes('prefPageNext') ? page + 1 : page - 1;
-        const { p, totalPages, slice } = prefSlice(next);
+            const select = new StringSelectMenuBuilder()
+                .setCustomId(`search:prefPick:${gid}:${ownerId}:${p}`)
+                .setPlaceholder(`都道府県を選択してください（複数可） ${p + 1}/${totalPages}`)
+                .setMinValues(0)
+                .setMaxValues(slice.length)
+                .addOptions(
+                    slice.map(x => ({
+                        label: x,
+                        value: x,
+                        default: st.prefectureFilters?.includes(x) ?? false,
+                    }))
+                );
 
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
+            const nav = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPagePrev:${gid}:${ownerId}:${p}`)
+                    .setLabel('◀ 前へ')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(p <= 0),
 
-        const select = new StringSelectMenuBuilder()
-            .setCustomId(`search:prefPick:${gid}:${ownerId}:${p}`)
-            .setPlaceholder(`都道府県を選択してください（複数可） ${p + 1}/${totalPages}`)
-            .setMinValues(0)
-            .setMaxValues(slice.length)
-            .addOptions(
-                slice.map(x => ({
-                    label: x,
-                    value: x,
-                    default: st.prefectureFilters?.includes(x) ?? false,
-                }))
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPageNext:${gid}:${ownerId}:${p}`)
+                    .setLabel('次へ ▶')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(p >= totalPages - 1),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPageClear:${gid}:${ownerId}`)
+                    .setLabel('解除')
+                    .setStyle(ButtonStyle.Secondary),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefBack:${gid}:${ownerId}`)
+                    .setLabel('戻る')
+                    .setStyle(ButtonStyle.Secondary),
             );
 
-        const nav = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`search:prefPagePrev:${gid}:${ownerId}:${p}`)
-                .setLabel('◀ 前へ')
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(p <= 0),
-
-            new ButtonBuilder()
-                .setCustomId(`search:prefPageNext:${gid}:${ownerId}:${p}`)
-                .setLabel('次へ ▶')
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(p >= totalPages - 1),
-
-            new ButtonBuilder()
-                .setCustomId(`search:prefPageClear:${gid}:${ownerId}`)
-                .setLabel('解除')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`search:prefBack:${gid}:${ownerId}`)
-                .setLabel('戻る')
-                .setStyle(ButtonStyle.Secondary),
-        );
-
-        return interaction.update({
-            content: '都道府県を選択してください',
-            embeds: [],
-            components: [new ActionRowBuilder().addComponents(select), nav],
-        });
-    }
-    if (id.startsWith('search:prefPageClear:')) {
-        const parts = id.split(':');
-        const gid = parts[2];
-        const ownerId = parts[3];
-
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-        st.prefectureFilters = [];
-        searchState.set(k, st);
-
-        return interaction.update({
-            content: '都道府県フィルタを解除しました',
-            embeds: [searchPanelEmbed(st)],
-            components: searchPanelComponents(guildId, userId, st),
-        });
-    }
-
-    // 都道府県ピッカー ページ送り（create/edit共通）
-    if (id.startsWith('create:prefPagePrev:') || id.startsWith('create:prefPageNext:') ||
-        id.startsWith('edit:prefPagePrev:') || id.startsWith('edit:prefPageNext:')) {
-
-        const parts = id.split(':');
-        const mode = parts[0];
-        const gid = parts[2];
-        const ownerId = parts[3];
-        const page = Number(parts[4] || 0);
-
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const next = id.includes('prefPageNext') ? page + 1 : page - 1;
-
-        // 同じephemeralメッセージを更新する（増やさない）
-        await interaction.update({
-            content: '都道府県を選択してください（任意）',
-            components: [
-                ...prefPickComponents(mode, gid, ownerId, next),
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`${mode}:panelBack:${gid}:${ownerId}`)
-                        .setLabel('戻る')
-                        .setStyle(ButtonStyle.Secondary)
-                ),
-            ],
-        });
-
-        return;
-    }
-
-    if (id.startsWith('create:searchPlace:') || id.startsWith('edit:searchPlace:')) {
-        const parts = id.split(':');
-        const mode = parts[0];
-        const gid = parts[2];
-        const ownerId = parts[3];
-
-        if (interaction.guildId !== gid) {
-            return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        }
-        if (userId !== ownerId) {
-            return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-        }
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== mode) {
-            return interaction.reply({
-                ephemeral: true,
-                content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
-            });
-        }
-
-        placeSearchState.set(k, {
-            mode,
-            query: d.name ?? '',
-            results: [],
-            page: 0,
-            nextPageToken: '',
-            loadingMore: false,
-        });
-
-        return interaction.showModal(
-            buildPlaceSearchModal(gid, ownerId, mode, d.name ?? '')
-        );
-    }
-
-    if (id.startsWith('create:setName:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) {
-            return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        }
-        if (userId !== ownerId) {
-            return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-        }
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildNameModal(gid, ownerId, d.name ?? ''));
-    }
-
-    // Home
-    if (id.startsWith('create:setVisit:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('✅ 訪問状態').setDescription('訪問状態を選択してください')],
-            components: [
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`create:visit:visited:${gid}:${ownerId}`).setLabel('✅ 行った').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(`create:visit:planned:${gid}:${ownerId}`).setLabel('📝 行きたい').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(`create:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary),
-                )
-            ],
-        });
-    }
-
-    if (id.startsWith('create:visit:')) {
-        const [, , kind, gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'create') {
-            return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
-        }
-
-        d.visited = kind === 'visited';
-
-        if (d.visited === false) {
-            d.rating = null;
-            d.visitedDate = '';
-        }
-
-        draftRating.set(k, d);
-        return renderCreatePanel(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('create:setRating:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('⭐ 評価').setDescription('評価を選択してください')],
-            components: [
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`create:rating:1:${gid}:${ownerId}`).setLabel('⭐').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId(`create:rating:2:${gid}:${ownerId}`).setLabel('⭐⭐').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId(`create:rating:3:${gid}:${ownerId}`).setLabel('⭐⭐⭐').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId(`create:rating:4:${gid}:${ownerId}`).setLabel('⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId(`create:rating:5:${gid}:${ownerId}`).setLabel('⭐⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
-                ),
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`create:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary),
-                )
-            ],
-        });
-    }
-
-    if (id.startsWith('create:rating:')) {
-        const [, , ratingStr, gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'create') {
-            return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
-        }
-
-        d.rating = Number(ratingStr);
-        draftRating.set(k, d);
-
-        return renderCreatePanel(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('create:setComment:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildCommentModal(gid, ownerId, d.comment ?? ''));
-    }
-
-    if (id.startsWith('create:setTags:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
-            components: tagEntryChoiceComponents('create', gid, ownerId),
-        });
-    }
-
-    if (id.startsWith('create:tagsExisting:') || id.startsWith('edit:tagsExisting:')) {
-        const parts = id.split(':');
-        const mode = parts[0];
-        const gid = parts[2];
-        const ownerId = parts[3];
-
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== mode) {
-            return interaction.reply({
-                ephemeral: true,
-                content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
-            });
-        }
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('🏷 既存タグ選択').setDescription('タグを選択してください')],
-            components: tagPickComponents(mode, gid, ownerId, cache, d.tags ?? [], 0),
-        });
-    }
-
-    if (id.startsWith('create:tagsNew:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildTagsModal(gid, ownerId, (d.tags ?? []).join(', ')));
-    }
-
-    if (id.startsWith('edit:tagsNew:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildEditTagsModal(gid, ownerId, (d.tags ?? []).join(', ')));
-    }
-
-    if (
-        id.startsWith('create:tagPagePrev:') || id.startsWith('create:tagPageNext:') ||
-        id.startsWith('edit:tagPagePrev:') || id.startsWith('edit:tagPageNext:')
-    ) {
-        const parts = id.split(':');
-        const mode = parts[0];
-        const gid = parts[2];
-        const ownerId = parts[3];
-        const page = Number(parts[4] || 0);
-
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== mode) {
-            return interaction.reply({
-                ephemeral: true,
-                content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
-            });
-        }
-
-        const next = id.includes('tagPageNext') ? page + 1 : page - 1;
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('🏷 既存タグ選択').setDescription('タグを選択してください')],
-            components: tagPickComponents(mode, gid, ownerId, cache, d.tags ?? [], next),
-        });
-    }
-
-    if (id.startsWith('create:tagClear:') || id.startsWith('edit:tagClear:')) {
-        const parts = id.split(':');
-        const mode = parts[0];
-        const gid = parts[2];
-        const ownerId = parts[3];
-
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== mode) {
-            return interaction.reply({
-                ephemeral: true,
-                content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
-            });
-        }
-
-        d.tags = [];
-        draftRating.set(k, d);
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
-            components: tagEntryChoiceComponents(mode, gid, ownerId),
-        });
-    }
-
-    if (id.startsWith('create:tagChoiceBack:') || id.startsWith('edit:tagChoiceBack:')) {
-        const parts = id.split(':');
-        const mode = parts[0];
-        const gid = parts[2];
-        const ownerId = parts[3];
-
-        if (interaction.guildId !== gid) {
-            return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        }
-        if (userId !== ownerId) {
-            return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-        }
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
-            components: tagEntryChoiceComponents(mode, gid, ownerId),
-        });
-    }
-
-    if (id.startsWith('create:setUrl:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildUrlModal(gid, ownerId, d.url ?? ''));
-    }
-
-    if (id.startsWith('create:setMap:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildMapModal(gid, ownerId, d.mapUrl ?? ''));
-    }
-
-    if (id.startsWith('create:setDate:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildVisitedDateModal(gid, ownerId, 'create', '', d.visitedDate ?? ''));
-    }
-
-    if (id.startsWith('create:setPref:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('🗾 都道府県').setDescription('都道府県を選択してください')],
-            components: [
-                ...prefPickComponents('create', gid, ownerId, 0),
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`create:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary)
-                )
-            ],
-        });
-    }
-
-    if (id.startsWith('create:panelBack:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return renderCreatePanel(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('create:reset:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        draftRating.set(k, {
-            mode: 'create',
-            postId: null,
-            visited: null,
-            rating: null,
-            comment: '',
-            prefecture: '',
-            visitedDate: '',
-            tags: [],
-            url: '',
-            mapUrl: '',
-            name: '',
-            channelId: interaction.channelId,
-        });
-
-        return renderCreatePanel(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('create:cancel:') || id.startsWith('create:home:')) {
-        const [, action, gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        draftRating.delete(k);
-
-        return interaction.update({
-            content: '',
-            embeds: [homeEmbed()],
-            components: homeComponents(),
-        });
-    }
-
-    if (id.startsWith('create:submit:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) {
-            return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        }
-        if (userId !== ownerId) {
-            return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-        }
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'create') {
-            return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
-        }
-
-        if (!d.name || !d.name.trim()) {
-            return interaction.reply({ ephemeral: true, content: 'お店の名前を入力してください' });
-        }
-
-        if (d.visited == null) {
-            return interaction.reply({ ephemeral: true, content: '訪問状態を選択してください' });
-        }
-
-        if (d.visited === true && (d.rating == null || ![1, 2, 3, 4, 5].includes(Number(d.rating)))) {
-            return interaction.reply({
-                ephemeral: true,
-                content: '「行った」を選んだ場合は評価を選択してください'
-            });
-        }
-
-        await interaction.deferUpdate();
-
-        const createdPost = await createPostInDb(interaction.guild, userId, d);
-
-        cacheReadyByGuild.set(guildId, false);
-        await ensureCacheLoadedForGuild(interaction.guild);
-
-        const cache = getGuildCache(guildId);
-        const post = cache.get(createdPost.id);
-
-        if (!post) {
-            return interaction.editReply({
-                content: '作成後の投稿取得に失敗しました',
-                embeds: [],
-                components: [],
-            });
-        }
-
-        draftRating.delete(k);
-        createPanelPromptRef.delete(k);
-
-        await interaction.editReply({
-            content: '',
-            embeds: [photoCreateWaitingEmbed(post.name ?? '(名称不明)')],
-            components: photoWaitingComponents(guildId, userId),
-        });
-
-        const waitingMsg = await interaction.fetchReply().catch(() => null);
-
-        awaitingPhoto.set(k, {
-            postId: post.id,
-            channelId: interaction.channelId,
-            guildId,
-            backTo: 'home',
-            uiMessageRef: waitingMsg?.id ? {
-                webhook: interaction.webhook,
-                messageId: waitingMsg.id,
-            } : null,
-        });
-
-        return;
-    }
-
-    if (id.startsWith('edit:setVisit:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('✅ 訪問状態').setDescription('訪問状態を選択してください')],
-            components: [
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`edit:visit:visited:${gid}:${ownerId}`).setLabel('✅ 行った').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(`edit:visit:planned:${gid}:${ownerId}`).setLabel('📝 行きたい').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(`edit:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary),
-                )
-            ],
-        });
-    }
-
-    if (id.startsWith('edit:setName:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) {
-            return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        }
-        if (userId !== ownerId) {
-            return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-        }
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'edit') {
-            return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-        }
-
-        return interaction.showModal(buildEditNameModal(gid, ownerId, d.name ?? ''));
-    }
-
-    if (id.startsWith('edit:visit:')) {
-        const [, , kind, gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'edit') {
-            return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-        }
-
-        d.visited = kind === 'visited';
-
-        if (d.visited === false) {
-            d.rating = null;
-            d.visitedDate = '';
-        }
-
-        draftRating.set(k, d);
-        return renderEditPanel(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('edit:setRating:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('⭐ 評価').setDescription('評価を選択してください')],
-            components: [
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`edit:rating:1:${gid}:${ownerId}`).setLabel('⭐').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId(`edit:rating:2:${gid}:${ownerId}`).setLabel('⭐⭐').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId(`edit:rating:3:${gid}:${ownerId}`).setLabel('⭐⭐⭐').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId(`edit:rating:4:${gid}:${ownerId}`).setLabel('⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId(`edit:rating:5:${gid}:${ownerId}`).setLabel('⭐⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
-                ),
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`edit:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary),
-                )
-            ],
-        });
-    }
-
-    if (id.startsWith('edit:rating:')) {
-        const [, , ratingStr, gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'edit') {
-            return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-        }
-
-        d.rating = Number(ratingStr);
-        draftRating.set(k, d);
-
-        return renderEditPanel(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('edit:setComment:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildEditCommentModal(gid, ownerId, d.comment ?? ''));
-    }
-
-    if (id.startsWith('edit:setTags:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
-            components: tagEntryChoiceComponents('edit', gid, ownerId),
-        });
-    }
-
-    if (id.startsWith('edit:setUrl:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildEditUrlModal(gid, ownerId, d.url ?? ''));
-    }
-
-    if (id.startsWith('edit:setMap:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildEditMapModal(gid, ownerId, d.mapUrl ?? ''));
-    }
-
-    if (id.startsWith('edit:setDate:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k) ?? {};
-        return interaction.showModal(buildVisitedDateModal(gid, ownerId, 'edit', '', d.visitedDate ?? ''));
-    }
-
-    if (id.startsWith('edit:setPref:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return interaction.update({
-            content: '',
-            embeds: [new EmbedBuilder().setTitle('🗾 都道府県').setDescription('都道府県を選択してください')],
-            components: [
-                ...prefPickComponents('edit', gid, ownerId, 0),
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`edit:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary)
-                )
-            ],
-        });
-    }
-
-    if (id.startsWith('edit:panelBack:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return renderEditPanel(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('edit:back:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) {
-            return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        }
-        if (userId !== ownerId) {
-            return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-        }
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'edit' || !d.postId) {
-            return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-        }
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(d.postId);
-
-        if (!post) {
             return interaction.update({
-                content: '',
-                embeds: [homeEmbed()],
-                components: homeComponents(),
+                content: '都道府県を選択してください',
+                embeds: [],
+                components: [new ActionRowBuilder().addComponents(select), nav],
             });
         }
-
-        const nav = getDetailNavState(guildId, userId, post.id);
-        const fromMine = nav?.fromMine ?? cameFromMine(k, post.id, mineState);
-        const forceHomeBack = nav?.forceHomeBack ?? false;
-
-        const { detail, components } = renderDetail(interaction, {
-            post,
-            guildId,
-            userId,
-            fromMine,
-            total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-            forceHomeBack,
-        });
-
-        return interaction.update({
-            content: '',
-            embeds: [detail],
-            components,
-        });
-    }
-
-    if (id.startsWith('edit:photos:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'edit' || !d.postId) {
-            return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-        }
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(d.postId);
-        if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-
-        const urls = imageUrls(post);
-        photoView.set(k, { postId: post.id, idx: Math.max(0, urls.length - 1) });
-
-        const idx = Math.max(0, urls.length - 1);
-
-        const embed = new EmbedBuilder()
-            .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
-            .setDescription(urls.length ? `写真 ${idx + 1}/${urls.length}` : '写真はありません');
-
-        if (urls.length && urls[idx]) {
-            embed.setImage(urls[idx]);
-        }
-
-        return interaction.update({
-            embeds: [embed],
-            components: photoManagerComponents(guildId, ownerId, post.id, urls.length),
-        });
-    }
-
-    if (id.startsWith('edit:submit:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const d = draftRating.get(k);
-        if (!d || d.mode !== 'edit' || !d.postId) {
-            return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-        }
-
-        if (!d.name?.trim()) {
-            return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
-        }
-
-        if (d.visited == null) {
-            return interaction.reply({ ephemeral: true, content: '訪問状態を選択してください' });
-        }
-
-        if (d.visited === true && (d.rating == null || ![1, 2, 3, 4, 5].includes(Number(d.rating)))) {
-            return interaction.reply({
-                ephemeral: true,
-                content: '「行った」を選んだ場合は評価を選択してください'
-            });
-        }
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(d.postId);
-        if (!post) return interaction.reply({ ephemeral: true, content: '対象データが見つかりません' });
-        if (!canEdit(interaction, post)) {
-            return interaction.reply({ ephemeral: true, content: '操作できるのは登録者または管理者のみです' });
-        }
-
-        await updatePostInDb(interaction.guild, userId, d);
-
-        cacheReadyByGuild.set(guildId, false);
-        await ensureCacheLoadedForGuild(interaction.guild);
-
-        const fresh = getGuildCache(guildId).get(d.postId);
-
-        draftRating.delete(k);
-        editPanelPromptRef.delete(k);
-
-        const nav = getDetailNavState(guildId, userId, fresh.id);
-        const fromMine = nav?.fromMine ?? cameFromMine(k, fresh.id, mineState);
-        const forceHomeBack = nav?.forceHomeBack ?? false;
-
-        const { detail, components } = renderDetail(interaction, {
-            post: fresh,
-            guildId,
-            userId,
-            fromMine,
-            total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-            forceHomeBack,
-        });
-
-        await interaction.update({
-            content: '',
-            embeds: [detail],
-            components,
-        });
-
-        const okMsg = await interaction.followUp({
-            content: '✅ 更新しました',
-            ephemeral: true,
-            fetchReply: true,
-        });
-
-        setTimeout(() => {
-            okMsg.delete().catch(() => { });
-        }, 2000);
-
-        return;
-    }
-
-    if (id === 'home:create') {
-        draftRating.set(k, {
-            mode: 'create',
-            postId: null,
-            visited: null,
-            rating: null,
-            comment: '',
-            prefecture: '',
-            visitedDate: '',
-            tags: [],
-            url: '',
-            mapUrl: '',
-            name: '',
-            channelId: interaction.channelId,
-        });
-
-        await renderCreatePanel(interaction, guildId, userId, { update: true });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-    if (id === 'home:search') {
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        searchState.set(k, st);
-
-        await interaction.update({
-            content: '',
-            embeds: [searchPanelEmbed(st)],
-            components: searchPanelComponents(guildId, userId, st),
-        });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-
-    if (id === 'home:mine') {
-        await interaction.deferUpdate();
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-
-        const mine = [...cache.values()]
-            .filter(p => p.created_by === userId)
-            .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-
-        mineState.set(k, {
-            results: mine.map(p => p.id),
-            page: 0,
-            visitFilter: 'all',
-        });
-
-        await renderMineList(interaction, guildId, userId, { update: true });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-
-    // Search panel
-    if (id.startsWith('search:setUser:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        const menu = new UserSelectMenuBuilder()
-            .setCustomId(`search:userPick:${guildId}:${ownerId}`)
-            .setPlaceholder('登録者を選択してください（複数可）')
-            .setMinValues(0)
-            .setMaxValues(25);
-
-        if (st.userIdFilter?.length) {
-            menu.setDefaultUsers(...st.userIdFilter);
-        }
-
-        const row1 = new ActionRowBuilder().addComponents(menu);
-
-        const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`search:userClear:${guildId}:${ownerId}`)
-                .setLabel('解除')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`search:userBack:${guildId}:${ownerId}`)
-                .setLabel('戻る')
-                .setStyle(ButtonStyle.Secondary)
-        );
-
-        await interaction.update({
-            content: '検索する登録者を選択してください',
-            embeds: [],
-            components: [row1, row2],
-        });
-
-        return;
-    }
-
-    if (id.startsWith('search:userClear:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        st.userIdFilter = null;
-        searchState.set(k, st);
-
-        return interaction.update({
-            content: '',
-            embeds: [searchPanelEmbed(st)],
-            components: searchPanelComponents(guildId, userId, st),
-        });
-    }
-
-    if (id.startsWith('search:userBack:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        return interaction.update({
-            content: '',
-            embeds: [searchPanelEmbed(st)],
-            components: searchPanelComponents(guildId, userId, st),
-        });
-    }
-
-    if (id.startsWith('search:prefBack:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) {
-            return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        }
-        if (userId !== ownerId) {
-            return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-        }
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        return interaction.update({
-            content: '',
-            embeds: [searchPanelEmbed(st)],
-            components: searchPanelComponents(guildId, userId, st),
-        });
-    }
-    
-    if (id.startsWith('search:setPref:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const { p, totalPages, slice } = prefSlice(0);
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        const select = new StringSelectMenuBuilder()
-            .setCustomId(`search:prefPick:${gid}:${ownerId}:${p}`)
-            .setPlaceholder(`都道府県を選択してください（複数可） ${p + 1}/${totalPages}`)
-            .setMinValues(0)
-            .setMaxValues(slice.length)
-            .addOptions(
-                slice.map(x => ({
-                    label: x,
-                    value: x,
-                    default: st.prefectureFilters?.includes(x) ?? false,
-                }))
-            );
-
-        const nav = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`search:prefPagePrev:${gid}:${ownerId}:${p}`)
-                .setLabel('◀ 前へ')
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(p <= 0),
-
-            new ButtonBuilder()
-                .setCustomId(`search:prefPageNext:${gid}:${ownerId}:${p}`)
-                .setLabel('次へ ▶')
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(p >= totalPages - 1),
-
-            new ButtonBuilder()
-                .setCustomId(`search:prefPageClear:${gid}:${ownerId}`)
-                .setLabel('解除')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`search:prefBack:${gid}:${ownerId}`)
-                .setLabel('戻る')
-                .setStyle(ButtonStyle.Secondary),
-        );
-
-        await interaction.update({
-            content: '都道府県を選択してください',
-            embeds: [],
-            components: [new ActionRowBuilder().addComponents(select), nav],
-        });
-
-        return;
-    }
-
-    if (id.startsWith('search:setText:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        // ここで元の検索パネル参照を保存
-        searchKeywordPromptRef.set(k, {
-            webhook: interaction.webhook,
-            messageId: interaction.message?.id,
-        });
-
-        const modal = new ModalBuilder()
-            .setCustomId(`modalSearch:${guildId}:${ownerId}`)
-            .setTitle('🔎 検索条件');
-
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('keyword')
-                    .setLabel('キーワード（スペース区切り）')
-                    .setPlaceholder('例：ラーメン 東京 深夜')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(false)
-                    .setValue(st.keyword ?? '')
-            )
-        );
-
-        return interaction.showModal(modal);
-    }
-
-    if (id.startsWith('search:clear:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const st = {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-        searchState.set(k, st);
-        return interaction.update({ embeds: [searchPanelEmbed(st)], components: searchPanelComponents(guildId, userId, st) });
-    }
-
-    if (id.startsWith('search:back:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-
-    if (id.startsWith('search:run:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        const keywords = (st.keyword ?? '')
-            .normalize('NFKC')
-            .toLowerCase()
-            .trim()
-            .split(/[ \u3000]+/)
-            .filter(Boolean);
-
-        const results = [...cache.values()]
-            .filter(p => {
-                if (st.userIdFilter?.length) {
-                    if (!st.userIdFilter.includes(p.created_by)) return false;
-                }
-
-                if (st.prefectureFilters?.length) {
-                    const pp = (p.prefecture ?? '').trim();
-                    if (!st.prefectureFilters.includes(pp)) return false;
-                }
-
-                if (st.tagFilters?.length) {
-                    const tags = (p.tags ?? [])
-                        .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
-                        .filter(Boolean);
-
-                    const selectedTags = (st.tagFilters ?? [])
-                        .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
-                        .filter(Boolean);
-
-                    if (selectedTags.length && !selectedTags.some(tag => tags.includes(tag))) {
-                        return false;
-                    }
-                }
-
-                if (keywords.length) {
-                    const hay = [
-                        p.name ?? '',
-                        p.comment ?? '',
-                        p.prefecture ?? '',
-                        ...(p.tags ?? [])
-                    ]
-                        .join('\n')
-                        .normalize('NFKC')
-                        .toLowerCase();
-
-                    for (const kw of keywords) {
-                        if (!hay.includes(kw)) return false;
-                    }
-                }
-
-                if (st.ratingFilters?.length) {
-                    if (!st.ratingFilters.includes(Number(p.rating))) return false;
-                }
-
-                return true;
-            })
-            .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-
-        st.results = results.map(p => p.id);
-        st.page = 0;
-        searchState.set(k, st);
-
-        if (!st.results.length) {
-            await interaction.update({
-                content: '該当する記録がありません',
+        if (id.startsWith('search:prefPageClear:')) {
+            const parts = id.split(':');
+            const gid = parts[2];
+            const ownerId = parts[3];
+
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+            st.prefectureFilters = [];
+            searchState.set(k, st);
+
+            return interaction.update({
+                content: '都道府県フィルタを解除しました',
                 embeds: [searchPanelEmbed(st)],
                 components: searchPanelComponents(guildId, userId, st),
             });
-            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-            return;
         }
 
-        return renderSearchResultList(interaction, guildId, userId, { update: true });
-    }
+        // 都道府県ピッカー ページ送り（create/edit共通）
+        if (id.startsWith('create:prefPagePrev:') || id.startsWith('create:prefPageNext:') ||
+            id.startsWith('edit:prefPagePrev:') || id.startsWith('edit:prefPageNext:')) {
 
-    // ⭐評価フィルター
-    if (id.startsWith('search:setRating:')) {
-        const [, , gid, ownerId, ratingStr] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            const parts = id.split(':');
+            const mode = parts[0];
+            const gid = parts[2];
+            const ownerId = parts[3];
+            const page = Number(parts[4] || 0);
 
-        const rating = Number(ratingStr);
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-        st.ratingFilters = Array.isArray(st.ratingFilters) ? st.ratingFilters : [];
+            const next = id.includes('prefPageNext') ? page + 1 : page - 1;
 
-        if (st.ratingFilters.includes(rating)) {
-            st.ratingFilters = st.ratingFilters.filter(x => x !== rating);
-        } else {
-            st.ratingFilters.push(rating);
-            st.ratingFilters.sort((a, b) => a - b);
-        }
-
-        searchState.set(k, st);
-
-        return interaction.update({
-            embeds: [searchPanelEmbed(st)],
-            components: searchPanelComponents(guildId, userId, st),
-        });
-    }
-
-    if (id.startsWith('res:prev:') || id.startsWith('res:next:')) {
-        const [, action, gid, ownerId, postId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(postId);
-        if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-
-        const urls = imageUrls(post);
-        if (urls.length <= 1) {
-            const nav = getDetailNavState(guildId, userId, postId);
-            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
-            const forceHomeBack = nav?.forceHomeBack ?? false;
-
-            const { detail, components } = renderDetail(interaction, {
-                post,
-                guildId,
-                userId,
-                fromMine,
-                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-                forceHomeBack,
-            });
-
-            return interaction.update({
-                content: '',
-                embeds: [detail],
-                components,
-            });
-        }
-
-        const pv = detailPhotoView.get(k) ?? { postId, idx: Math.max(0, urls.length - 1) };
-        pv.postId = postId;
-
-        if (action === 'prev') {
-            pv.idx = (pv.idx - 1 + urls.length) % urls.length;
-        } else {
-            pv.idx = (pv.idx + 1) % urls.length;
-        }
-
-        detailPhotoView.set(k, pv);
-
-        const nav = getDetailNavState(guildId, userId, postId);
-        const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
-        const forceHomeBack = nav?.forceHomeBack ?? false;
-
-        const { detail, components } = renderDetail(interaction, {
-            post,
-            guildId,
-            userId,
-            fromMine,
-            total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-            forceHomeBack,
-        });
-
-        return interaction.update({
-            content: '',
-            embeds: [detail],
-            components,
-        });
-    }
-
-    // Share
-    if (id.startsWith('res:share:')) {
-        const [, , gid, ownerId, postId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        cacheReadyByGuild.set(guildId, false);
-        await ensureCacheLoadedForGuild(interaction.guild);
-
-        const cache = getGuildCache(guildId);
-        const post = cache.get(postId);
-        if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-
-        const chunks = buildDetailEmbedsChunks(post, { sharedByUserId: userId });
-        for (const embeds of chunks) {
-            await interaction.channel.send({ embeds });
-        }
-
-        const nav = getDetailNavState(guildId, userId, postId);
-        const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
-        const forceHomeBack = nav?.forceHomeBack ?? false;
-
-        const { detail, components } = renderDetail(interaction, {
-            post,
-            guildId,
-            userId,
-            fromMine,
-            total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-            forceHomeBack,
-            notice: 'このチャンネルに送信しました',
-        });
-
-        await interaction.update({
-            content: '',
-            embeds: [detail],
-            components,
-        });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-
-    // Edit from result (only if canEdit)
-    if (id.startsWith('res:edit:')) {
-        const [, , gid, ownerId, postId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(postId);
-        if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-        if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '編集できません（投稿者のみ）' });
-
-        const nav = getDetailNavState(guildId, userId, postId);
-        setDetailNavState(guildId, userId, postId, {
-            fromMine: nav?.fromMine ?? cameFromMine(k, postId, mineState),
-            forceHomeBack: nav?.forceHomeBack ?? false,
-        });
-
-        draftRating.set(k, {
-            mode: 'edit',
-            postId,
-            visited: post.visited !== false,
-            rating: post.rating ?? null,
-            comment: post.comment ?? '',
-            prefecture: post.prefecture ?? '',
-            visitedDate: post.visited_date ?? '',
-            tags: post.tags ?? [],
-            url: post.url ?? '',
-            mapUrl: post.map_url ?? '',
-            name: post.name ?? '',
-            channelId: interaction.channelId,
-        });
-
-        await renderEditPanel(interaction, guildId, userId, { update: true });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-
-    // Photos from result (only if canEdit)
-    if (id.startsWith('res:photos:')) {
-        const [, , gid, ownerId, postId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(postId);
-        if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-        if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
-
-        const urls = imageUrls(post);
-
-        photoView.set(k, { postId, idx: Math.max(0, urls.length - 1) });
-        const pv = photoView.get(k);
-        const total = urls.length;
-
-        const embed = new EmbedBuilder()
-            .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
-            .setDescription(total ? `写真 ${pv.idx + 1}/${total}` : '写真はありません');
-
-        if (total && urls[pv.idx]) {
-            embed.setImage(urls[pv.idx]);
-        }
-
-        return interaction.update({
-            embeds: [embed],
-            components: photoManagerComponents(guildId, ownerId, postId, total),
-        });
-    }
-
-    if (id.startsWith('res:delete:')) {
-        const [, , gid, ownerId, postId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(postId);
-        if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-        if (!canEdit(interaction, post)) {
-            return interaction.reply({ ephemeral: true, content: '削除できるのは登録者または管理者のみです' });
-        }
-
-        const urls = imageUrls(post);
-        const k = keyOf(guildId, userId);
-        const pv = detailPhotoView.get(k);
-        const idx = pv?.postId === postId
-            ? Math.max(0, Math.min(urls.length - 1, Number(pv.idx) || 0))
-            : Math.max(0, urls.length - 1);
-
-        return interaction.update({
-            content: '',
-            embeds: [confirmDeletePostEmbed(post, { imageIndex: idx })],
-            components: confirmComponents('deletePost', guildId, userId, postId, String(idx), urls.length > 1),
-        });
-    }
-
-    if (id.startsWith('search:listBack:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        return renderSearchResultList(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('search:backToPanel:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            tagFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        return interaction.update({
-            content: '',
-            embeds: [searchPanelEmbed(st)],
-            components: searchPanelComponents(guildId, userId, st),
-        });
-    }
-
-    if (id.startsWith('search:home:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await interaction.update({
-            content: '',
-            embeds: [homeEmbed()],
-            components: homeComponents(),
-        });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-
-    // Photo manager
-    if (id.startsWith('ph:')) {
-        const [, action, gid, ownerId, postId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(postId);
-        if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-        if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
-
-        const pv = photoView.get(k) ?? { postId, idx: 0 };
-        pv.postId = postId;
-
-        const urls = imageUrls(post);
-        const total = urls.length;
-
-        if (action === 'prev' && total) pv.idx = (pv.idx - 1 + total) % total;
-        if (action === 'next' && total) pv.idx = (pv.idx + 1) % total;
-
-        if (action === 'add') {
-
-            const waitPayload = {
-                content: '',
-                embeds: [photoAddWaitingEmbed(post.name)],
-                components: photoWaitingComponents(guildId, userId),
-            };
-
-            await interaction.update(waitPayload);
-
-            awaitingPhoto.set(k, {
-                postId,
-                channelId: interaction.channelId,
-                guildId,
-                backTo: 'detail',
-                uiMessageRef: {
-                    webhook: interaction.webhook,
-                    messageId: interaction.message?.id,
-                },
+            // 同じephemeralメッセージを更新する（増やさない）
+            await interaction.update({
+                content: '都道府県を選択してください（任意）',
+                components: [
+                    ...prefPickComponents(mode, gid, ownerId, next),
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`${mode}:panelBack:${gid}:${ownerId}`)
+                            .setLabel('戻る')
+                            .setStyle(ButtonStyle.Secondary)
+                    ),
+                ],
             });
 
             return;
         }
 
-        if (action === 'del') {
-            const urls = imageUrls(post);
-            if (!urls.length) {
-                return interaction.reply({ ephemeral: true, content: '写真がありません' });
-            }
-
-            const idx = Math.max(0, Math.min(urls.length - 1, Number(pv.idx) || 0));
-
-            return interaction.update({
-                content: '',
-                embeds: [confirmPhotoDeleteEmbed(post, idx)],
-                components: confirmComponents('deletePhoto', guildId, ownerId, postId, String(idx)),
-            });
-        }
-
-        if (action === 'delall') {
-            const imgs = post.images ?? [];
-
-            if (!imgs.length) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: '写真がありません'
-                });
-            }
-
-            return interaction.update({
-                content: '',
-                embeds: [confirmDeleteAllPhotosEmbed(post)],
-                components: confirmComponents(
-                    'deleteAllPhotos',
-                    guildId,
-                    ownerId,
-                    postId,
-                    '0',
-                    imgs.length > 1
-                ),
-            });
-        }
-
-        if (action === 'back') {
-            const nav = getDetailNavState(guildId, userId, postId);
-            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
-            const forceHomeBack = nav?.forceHomeBack ?? false;
-
-            const { detail, components } = renderDetail(interaction, {
-                post,
-                guildId,
-                userId,
-                fromMine,
-                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
-                forceHomeBack,
-            });
-
-            await interaction.update({ embeds: [detail], components });
-            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-            return;
-        }
-
-        photoView.set(k, pv);
-
-        const urls2 = imageUrls(post);
-        const newTotal = urls2.length;
-
-        // idx補正（削除後とかで範囲外になるのを防ぐ）
-        if (pv.idx >= newTotal) pv.idx = Math.max(0, newTotal - 1);
-
-        const embed = new EmbedBuilder()
-            .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
-            .setDescription(newTotal ? `写真 ${pv.idx + 1}/${newTotal}` : '写真はありません');
-
-        if (newTotal && urls2[pv.idx]) {
-            embed.setImage(urls2[pv.idx]);
-        }
-
-        return interaction.update({
-            embeds: [embed],
-            components: photoManagerComponents(guildId, ownerId, postId, newTotal),
-        });
-    }
-
-    if (id.startsWith('mine:filter:')) {
-        const [, , filter, gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) {
-            return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        }
-        if (userId !== ownerId) {
-            return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-        }
-
-        const st = mineState.get(k);
-        if (!st) {
-            return interaction.reply({ ephemeral: true, content: '一覧がありません' });
-        }
-
-        if (!['all', 'visited', 'planned'].includes(filter)) {
-            return interaction.reply({ ephemeral: true, content: 'フィルタが不正です' });
-        }
-
-        st.visitFilter = filter;
-        st.page = 0;
-        mineState.set(k, st);
-
-        return renderMineList(interaction, guildId, userId, { update: true });
-    }
-
-    // Mine list paging/back
-    if (id.startsWith('mine:prev:') || id.startsWith('mine:next:')) {
-        const [, dir, gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const st = mineState.get(k);
-        if (!st?.results?.length) return interaction.reply({ ephemeral: true, content: '一覧がありません' });
-
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-
-        const filteredIds = st.results.filter(pid => {
-            const p = cache.get(pid);
-            if (!p) return false;
-            return visitFilterMatch(st, p);
-        });
-
-        const pageSize = 9;
-        const maxPage = Math.max(0, Math.ceil(filteredIds.length / pageSize) - 1);
-
-        st.page = Number(st.page) || 0;
-        st.page += dir === 'prev' ? -1 : +1;
-        if (st.page < 0) st.page = 0;
-        if (st.page > maxPage) st.page = maxPage;
-        mineState.set(k, st);
-
-        return renderMineList(interaction, guildId, userId, { update: true });
-    }
-
-    if (id.startsWith('mine:home:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-
-    if (id.startsWith('mine:back:')) {
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        await renderMineList(interaction, guildId, userId, { update: true });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-
-    // User select menu (search filter user)
-    if (interaction.isUserSelectMenu()) {
-        const id = interaction.customId;
-        if (!id.startsWith('search:userPick:')) return;
-
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-        const pickedIds = (interaction.values ?? []).filter(Boolean);
-        const st = searchState.get(k) ?? {
-            userIdFilter: null,
-            prefectureFilters: [],
-            keyword: '',
-            ratingFilters: [],
-            results: [],
-            page: 0
-        };
-
-        st.userIdFilter = pickedIds.length ? pickedIds : null;
-        searchState.set(k, st);
-
-        return interaction.update({
-            content: '',
-            embeds: [searchPanelEmbed(st)],
-            components: searchPanelComponents(guildId, userId, st),
-        });
-    }
-
-    // String select menu (mine list pick)
-    if (interaction.isStringSelectMenu()) {
-        const id = interaction.customId;
         if (id.startsWith('create:searchPlace:') || id.startsWith('edit:searchPlace:')) {
             const parts = id.split(':');
             const mode = parts[0];
@@ -5724,9 +4014,8 @@ client.on(Events.InteractionCreate, async interaction => {
             );
         }
 
-        if (id.startsWith('place:pick:')) {
+        if (id.startsWith('create:setName:')) {
             const [, , gid, ownerId] = id.split(':');
-
             if (interaction.guildId !== gid) {
                 return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             }
@@ -5734,96 +4023,216 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
             }
 
-            const picked = interaction.values?.[0];
-            if (!picked || picked === 'none') {
-                return interaction.reply({ ephemeral: true, content: '候補を選択してください' });
-            }
-
-            const st = placeSearchState.get(k);
-            if (!st) {
-                return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
-            }
-
-            const idx = Number(picked);
-            const selected = st.results?.[idx];
-
-            if (!selected) {
-                return interaction.reply({ ephemeral: true, content: '候補が見つかりません' });
-            }
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== st.mode) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: st.mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
-                });
-            }
-
-            d.name = selected.name || d.name || '';
-            d.mapUrl = selected.mapUrl || d.mapUrl || '';
-            d.place = {
-                placeId: selected.placeId,
-                name: selected.name,
-                address: selected.address,
-                mapUrl: selected.mapUrl,
-            };
-            draftRating.set(k, d);
-            placeSearchState.delete(k);
-
-            if (st.mode === 'create') {
-                return renderCreatePanel(interaction, guildId, userId, { update: true });
-            }
-
-            return renderEditPanel(interaction, guildId, userId, { update: true });
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildNameModal(gid, ownerId, d.name ?? ''));
         }
 
-        // ===== 検索：都道府県ピック =====
-        if (id.startsWith('search:prefPick:')) {
-            const parts = id.split(':');
-            const gid = parts[2];
-            const ownerId = parts[3];
+        // Home
+        if (id.startsWith('create:setVisit:')) {
+            const [, , gid, ownerId] = id.split(':');
             if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-            const picked = interaction.values ?? [];
-            const page = Number(parts[4] || 0);
-
-            const st = searchState.get(k) ?? {
-                userIdFilter: null,
-                prefectureFilters: [],
-                tagFilters: [],
-                keyword: '',
-                ratingFilters: [],
-                results: [],
-                page: 0
-            };
-
-            const { slice } = prefSlice(page);
-            const current = new Set(st.prefectureFilters ?? []);
-
-            // 今のページにある都道府県は一旦外す
-            for (const pref of slice) {
-                current.delete(pref);
-            }
-
-            // 今回選んだものを追加
-            for (const pref of picked) {
-                current.add(pref);
-            }
-
-            st.prefectureFilters = [...current];
-            searchState.set(k, st);
-
             return interaction.update({
-                content: st.prefectureFilters.length
-                    ? `都道府県を設定しました: ${st.prefectureFilters.join(' / ')}`
-                    : '都道府県を解除しました',
-                embeds: [searchPanelEmbed(st)],
-                components: searchPanelComponents(guildId, userId, st),
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('✅ 訪問状態').setDescription('訪問状態を選択してください')],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`create:visit:visited:${gid}:${ownerId}`).setLabel('✅ 行った').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId(`create:visit:planned:${gid}:${ownerId}`).setLabel('📝 行きたい').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId(`create:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary),
+                    )
+                ],
             });
         }
 
-        if (id.startsWith('create:prefPick:') || id.startsWith('edit:prefPick:')) {
+        if (id.startsWith('create:visit:')) {
+            const [, , kind, gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'create') {
+                return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+            }
+
+            d.visited = kind === 'visited';
+
+            if (d.visited === false) {
+                d.rating = null;
+                d.visitedDate = '';
+            }
+
+            draftRating.set(k, d);
+            return renderCreatePanel(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('create:setRating:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('⭐ 評価').setDescription('評価を選択してください')],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`create:rating:1:${gid}:${ownerId}`).setLabel('⭐').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId(`create:rating:2:${gid}:${ownerId}`).setLabel('⭐⭐').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId(`create:rating:3:${gid}:${ownerId}`).setLabel('⭐⭐⭐').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId(`create:rating:4:${gid}:${ownerId}`).setLabel('⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId(`create:rating:5:${gid}:${ownerId}`).setLabel('⭐⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`create:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary),
+                    )
+                ],
+            });
+        }
+
+        if (id.startsWith('create:rating:')) {
+            const [, , ratingStr, gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'create') {
+                return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+            }
+
+            d.rating = Number(ratingStr);
+            draftRating.set(k, d);
+
+            return renderCreatePanel(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('create:setComment:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildCommentModal(gid, ownerId, d.comment ?? ''));
+        }
+
+        if (id.startsWith('create:setTags:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
+                components: tagEntryChoiceComponents('create', gid, ownerId),
+            });
+        }
+
+        if (id.startsWith('create:tagsExisting:') || id.startsWith('edit:tagsExisting:')) {
+            const parts = id.split(':');
+            const mode = parts[0];
+            const gid = parts[2];
+            const ownerId = parts[3];
+
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== mode) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                });
+            }
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🏷 既存タグ選択').setDescription('タグを選択してください')],
+                components: tagPickComponents(mode, gid, ownerId, cache, d.tags ?? [], 0),
+            });
+        }
+
+        if (id.startsWith('create:tagsNew:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildTagsModal(gid, ownerId, (d.tags ?? []).join(', ')));
+        }
+
+        if (id.startsWith('edit:tagsNew:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildEditTagsModal(gid, ownerId, (d.tags ?? []).join(', ')));
+        }
+
+        if (
+            id.startsWith('create:tagPagePrev:') || id.startsWith('create:tagPageNext:') ||
+            id.startsWith('edit:tagPagePrev:') || id.startsWith('edit:tagPageNext:')
+        ) {
+            const parts = id.split(':');
+            const mode = parts[0];
+            const gid = parts[2];
+            const ownerId = parts[3];
+            const page = Number(parts[4] || 0);
+
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== mode) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                });
+            }
+
+            const next = id.includes('tagPageNext') ? page + 1 : page - 1;
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🏷 既存タグ選択').setDescription('タグを選択してください')],
+                components: tagPickComponents(mode, gid, ownerId, cache, d.tags ?? [], next),
+            });
+        }
+
+        if (id.startsWith('create:tagClear:') || id.startsWith('edit:tagClear:')) {
+            const parts = id.split(':');
+            const mode = parts[0];
+            const gid = parts[2];
+            const ownerId = parts[3];
+
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== mode) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                });
+            }
+
+            d.tags = [];
+            draftRating.set(k, d);
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
+                components: tagEntryChoiceComponents(mode, gid, ownerId),
+            });
+        }
+
+        if (id.startsWith('create:tagChoiceBack:') || id.startsWith('edit:tagChoiceBack:')) {
             const parts = id.split(':');
             const mode = parts[0];
             const gid = parts[2];
@@ -5836,47 +4245,379 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
             }
 
-            const picked = interaction.values?.[0] ?? '';
-            const d = draftRating.get(k);
-
-            if (!d || d.mode !== mode) {
-                return interaction.reply({ ephemeral: true, content: '途中状態がありません' });
-            }
-
-            d.prefecture = picked;
-            draftRating.set(k, d);
-
-            if (mode === 'create') {
-                return renderCreatePanel(interaction, guildId, userId, { update: true });
-            }
-
-            return renderEditPanel(interaction, guildId, userId, { update: true });
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
+                components: tagEntryChoiceComponents(mode, gid, ownerId),
+            });
         }
 
-        if (id.startsWith('search:pick:')) {
+        if (id.startsWith('create:setUrl:')) {
             const [, , gid, ownerId] = id.split(':');
             if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-            const postId = interaction.values?.[0];
-            if (!postId || postId === 'none') {
-                return interaction.reply({ ephemeral: true, content: '選択が不正です' });
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildUrlModal(gid, ownerId, d.url ?? ''));
+        }
+
+        if (id.startsWith('create:setMap:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildMapModal(gid, ownerId, d.mapUrl ?? ''));
+        }
+
+        if (id.startsWith('create:setDate:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildVisitedDateModal(gid, ownerId, 'create', '', d.visitedDate ?? ''));
+        }
+
+        if (id.startsWith('create:setPref:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🗾 都道府県').setDescription('都道府県を選択してください')],
+                components: [
+                    ...prefPickComponents('create', gid, ownerId, 0),
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`create:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary)
+                    )
+                ],
+            });
+        }
+
+        if (id.startsWith('create:panelBack:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return renderCreatePanel(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('create:reset:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            draftRating.set(k, {
+                mode: 'create',
+                postId: null,
+                visited: null,
+                rating: null,
+                comment: '',
+                prefecture: '',
+                visitedDate: '',
+                tags: [],
+                url: '',
+                mapUrl: '',
+                name: '',
+                channelId: interaction.channelId,
+            });
+
+            return renderCreatePanel(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('create:cancel:') || id.startsWith('create:home:')) {
+            const [, action, gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            draftRating.delete(k);
+
+            return interaction.update({
+                content: '',
+                embeds: [homeEmbed()],
+                components: homeComponents(),
+            });
+        }
+
+        if (id.startsWith('create:submit:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'create') {
+                return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+            }
+
+            if (!d.name || !d.name.trim()) {
+                return interaction.reply({ ephemeral: true, content: 'お店の名前を入力してください' });
+            }
+
+            if (d.visited == null) {
+                return interaction.reply({ ephemeral: true, content: '訪問状態を選択してください' });
+            }
+
+            if (d.visited === true && (d.rating == null || ![1, 2, 3, 4, 5].includes(Number(d.rating)))) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: '「行った」を選んだ場合は評価を選択してください'
+                });
+            }
+
+            await interaction.deferUpdate();
+
+            const createdPost = await createPostInDb(interaction.guild, userId, d);
+
+            cacheReadyByGuild.set(guildId, false);
+            await ensureCacheLoadedForGuild(interaction.guild);
+
+            const cache = getGuildCache(guildId);
+            const post = cache.get(createdPost.id);
+
+            if (!post) {
+                return interaction.editReply({
+                    content: '作成後の投稿取得に失敗しました',
+                    embeds: [],
+                    components: [],
+                });
+            }
+
+            draftRating.delete(k);
+            createPanelPromptRef.delete(k);
+
+            await interaction.editReply({
+                content: '',
+                embeds: [photoCreateWaitingEmbed(post.name ?? '(名称不明)')],
+                components: photoWaitingComponents(guildId, userId),
+            });
+
+            const waitingMsg = await interaction.fetchReply().catch(() => null);
+
+            awaitingPhoto.set(k, {
+                postId: post.id,
+                channelId: interaction.channelId,
+                guildId,
+                backTo: 'home',
+                uiMessageRef: waitingMsg?.id ? {
+                    webhook: interaction.webhook,
+                    messageId: waitingMsg.id,
+                } : null,
+            });
+
+            return;
+        }
+
+        if (id.startsWith('edit:setVisit:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('✅ 訪問状態').setDescription('訪問状態を選択してください')],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`edit:visit:visited:${gid}:${ownerId}`).setLabel('✅ 行った').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId(`edit:visit:planned:${gid}:${ownerId}`).setLabel('📝 行きたい').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId(`edit:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary),
+                    )
+                ],
+            });
+        }
+
+        if (id.startsWith('edit:setName:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'edit') {
+                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+            }
+
+            return interaction.showModal(buildEditNameModal(gid, ownerId, d.name ?? ''));
+        }
+
+        if (id.startsWith('edit:visit:')) {
+            const [, , kind, gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'edit') {
+                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+            }
+
+            d.visited = kind === 'visited';
+
+            if (d.visited === false) {
+                d.rating = null;
+                d.visitedDate = '';
+            }
+
+            draftRating.set(k, d);
+            return renderEditPanel(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('edit:setRating:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('⭐ 評価').setDescription('評価を選択してください')],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`edit:rating:1:${gid}:${ownerId}`).setLabel('⭐').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId(`edit:rating:2:${gid}:${ownerId}`).setLabel('⭐⭐').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId(`edit:rating:3:${gid}:${ownerId}`).setLabel('⭐⭐⭐').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId(`edit:rating:4:${gid}:${ownerId}`).setLabel('⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId(`edit:rating:5:${gid}:${ownerId}`).setLabel('⭐⭐⭐⭐⭐').setStyle(ButtonStyle.Primary),
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`edit:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary),
+                    )
+                ],
+            });
+        }
+
+        if (id.startsWith('edit:rating:')) {
+            const [, , ratingStr, gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'edit') {
+                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+            }
+
+            d.rating = Number(ratingStr);
+            draftRating.set(k, d);
+
+            return renderEditPanel(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('edit:setComment:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildEditCommentModal(gid, ownerId, d.comment ?? ''));
+        }
+
+        if (id.startsWith('edit:setTags:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🏷 タグ').setDescription('入力方法を選択してください')],
+                components: tagEntryChoiceComponents('edit', gid, ownerId),
+            });
+        }
+
+        if (id.startsWith('edit:setUrl:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildEditUrlModal(gid, ownerId, d.url ?? ''));
+        }
+
+        if (id.startsWith('edit:setMap:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildEditMapModal(gid, ownerId, d.mapUrl ?? ''));
+        }
+
+        if (id.startsWith('edit:setDate:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const d = draftRating.get(k) ?? {};
+            return interaction.showModal(buildVisitedDateModal(gid, ownerId, 'edit', '', d.visitedDate ?? ''));
+        }
+
+        if (id.startsWith('edit:setPref:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return interaction.update({
+                content: '',
+                embeds: [new EmbedBuilder().setTitle('🗾 都道府県').setDescription('都道府県を選択してください')],
+                components: [
+                    ...prefPickComponents('edit', gid, ownerId, 0),
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`edit:panelBack:${gid}:${ownerId}`).setLabel('戻る').setStyle(ButtonStyle.Secondary)
+                    )
+                ],
+            });
+        }
+
+        if (id.startsWith('edit:panelBack:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return renderEditPanel(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('edit:back:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'edit' || !d.postId) {
+                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
             }
 
             await ensureCacheLoadedForGuild(interaction.guild);
             const cache = getGuildCache(guildId);
-            const post = cache.get(postId);
+            const post = cache.get(d.postId);
+
             if (!post) {
-                return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+                return interaction.update({
+                    content: '',
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
+                });
             }
+
+            const nav = getDetailNavState(guildId, userId, post.id);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, post.id, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
 
             const { detail, components } = renderDetail(interaction, {
                 post,
                 guildId,
                 userId,
-                fromMine: false,
-                total: searchState.get(k)?.results?.length || 1,
-                forceHomeBack: false,
+                fromMine,
+                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                forceHomeBack,
             });
 
             return interaction.update({
@@ -5886,52 +4627,276 @@ client.on(Events.InteractionCreate, async interaction => {
             });
         }
 
-        if (!id.startsWith('mine:pick:')) return;
+        if (id.startsWith('edit:photos:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-        const [, , gid, ownerId] = id.split(':');
-        if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-        if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'edit' || !d.postId) {
+                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+            }
 
-        const postId = interaction.values?.[0];
-        if (!postId || postId === 'none') return interaction.reply({ ephemeral: true, content: '選択が不正です' });
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(d.postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
 
-        await interaction.deferUpdate();
+            const urls = imageUrls(post);
+            photoView.set(k, { postId: post.id, idx: Math.max(0, urls.length - 1) });
 
-        await ensureCacheLoadedForGuild(interaction.guild);
-        const cache = getGuildCache(guildId);
-        const post = cache.get(postId);
-        if (!post) {
-            return interaction.editReply({
-                content: 'データが見つかりません',
-                embeds: [],
-                components: homeComponents(),
+            const idx = Math.max(0, urls.length - 1);
+
+            const embed = new EmbedBuilder()
+                .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+                .setDescription(urls.length ? `写真 ${idx + 1}/${urls.length}` : '写真はありません');
+
+            if (urls.length && urls[idx]) {
+                embed.setImage(urls[idx]);
+            }
+
+            return interaction.update({
+                embeds: [embed],
+                components: photoManagerComponents(guildId, ownerId, post.id, urls.length),
             });
         }
 
-        const { detail, components } = renderDetail(interaction, {
-            post,
-            guildId,
-            userId,
-            fromMine: true,
-            total: 1,
-            forceHomeBack: false,
-        });
+        if (id.startsWith('edit:submit:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-        await interaction.editReply({
-            content: '',
-            embeds: [detail],
-            components,
-        });
-        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-        return;
-    }
-    // Modal submit
-    if (interaction.isModalSubmit()) {
-        const id = interaction.customId;
+            const d = draftRating.get(k);
+            if (!d || d.mode !== 'edit' || !d.postId) {
+                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+            }
 
-        if (id.startsWith('modalPlaceSearch:')) {
-            const [, gid, ownerId, mode] = id.split(':');
+            if (!d.name?.trim()) {
+                return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
+            }
 
+            if (d.visited == null) {
+                return interaction.reply({ ephemeral: true, content: '訪問状態を選択してください' });
+            }
+
+            if (d.visited === true && (d.rating == null || ![1, 2, 3, 4, 5].includes(Number(d.rating)))) {
+                return interaction.reply({
+                    ephemeral: true,
+                    content: '「行った」を選んだ場合は評価を選択してください'
+                });
+            }
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(d.postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: '対象データが見つかりません' });
+            if (!canEdit(interaction, post)) {
+                return interaction.reply({ ephemeral: true, content: '操作できるのは登録者または管理者のみです' });
+            }
+
+            await updatePostInDb(interaction.guild, userId, d);
+
+            cacheReadyByGuild.set(guildId, false);
+            await ensureCacheLoadedForGuild(interaction.guild);
+
+            const fresh = getGuildCache(guildId).get(d.postId);
+
+            draftRating.delete(k);
+            editPanelPromptRef.delete(k);
+
+            const nav = getDetailNavState(guildId, userId, fresh.id);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, fresh.id, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
+
+            const { detail, components } = renderDetail(interaction, {
+                post: fresh,
+                guildId,
+                userId,
+                fromMine,
+                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                forceHomeBack,
+            });
+
+            await interaction.update({
+                content: '',
+                embeds: [detail],
+                components,
+            });
+
+            const okMsg = await interaction.followUp({
+                content: '✅ 更新しました',
+                ephemeral: true,
+                fetchReply: true,
+            });
+
+            setTimeout(() => {
+                okMsg.delete().catch(() => { });
+            }, 2000);
+
+            return;
+        }
+
+        if (id === 'home:create') {
+            draftRating.set(k, {
+                mode: 'create',
+                postId: null,
+                visited: null,
+                rating: null,
+                comment: '',
+                prefecture: '',
+                visitedDate: '',
+                tags: [],
+                url: '',
+                mapUrl: '',
+                name: '',
+                channelId: interaction.channelId,
+            });
+
+            await renderCreatePanel(interaction, guildId, userId, { update: true });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+        if (id === 'home:search') {
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            searchState.set(k, st);
+
+            await interaction.update({
+                content: '',
+                embeds: [searchPanelEmbed(st)],
+                components: searchPanelComponents(guildId, userId, st),
+            });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        if (id === 'home:mine') {
+            await interaction.deferUpdate();
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+
+            const mine = [...cache.values()]
+                .filter(p => p.created_by === userId)
+                .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+
+            mineState.set(k, {
+                results: mine.map(p => p.id),
+                page: 0,
+                visitFilter: 'all',
+            });
+
+            await renderMineList(interaction, guildId, userId, { update: true });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        // Search panel
+        if (id.startsWith('search:setUser:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            const menu = new UserSelectMenuBuilder()
+                .setCustomId(`search:userPick:${guildId}:${ownerId}`)
+                .setPlaceholder('登録者を選択してください（複数可）')
+                .setMinValues(0)
+                .setMaxValues(25);
+
+            if (st.userIdFilter?.length) {
+                menu.setDefaultUsers(...st.userIdFilter);
+            }
+
+            const row1 = new ActionRowBuilder().addComponents(menu);
+
+            const row2 = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`search:userClear:${guildId}:${ownerId}`)
+                    .setLabel('解除')
+                    .setStyle(ButtonStyle.Secondary),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:userBack:${guildId}:${ownerId}`)
+                    .setLabel('戻る')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+
+            await interaction.update({
+                content: '検索する登録者を選択してください',
+                embeds: [],
+                components: [row1, row2],
+            });
+
+            return;
+        }
+
+        if (id.startsWith('search:userClear:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            st.userIdFilter = null;
+            searchState.set(k, st);
+
+            return interaction.update({
+                content: '',
+                embeds: [searchPanelEmbed(st)],
+                components: searchPanelComponents(guildId, userId, st),
+            });
+        }
+
+        if (id.startsWith('search:userBack:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            return interaction.update({
+                content: '',
+                embeds: [searchPanelEmbed(st)],
+                components: searchPanelComponents(guildId, userId, st),
+            });
+        }
+
+        if (id.startsWith('search:prefBack:')) {
+            const [, , gid, ownerId] = id.split(':');
             if (interaction.guildId !== gid) {
                 return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             }
@@ -5939,516 +4904,1097 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
             }
 
-            const d = draftRating.get(k);
-            if (!d || d.mode !== mode) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            return interaction.update({
+                content: '',
+                embeds: [searchPanelEmbed(st)],
+                components: searchPanelComponents(guildId, userId, st),
+            });
+        }
+
+        if (id.startsWith('search:setPref:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const { p, totalPages, slice } = prefSlice(0);
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            const select = new StringSelectMenuBuilder()
+                .setCustomId(`search:prefPick:${gid}:${ownerId}:${p}`)
+                .setPlaceholder(`都道府県を選択してください（複数可） ${p + 1}/${totalPages}`)
+                .setMinValues(0)
+                .setMaxValues(slice.length)
+                .addOptions(
+                    slice.map(x => ({
+                        label: x,
+                        value: x,
+                        default: st.prefectureFilters?.includes(x) ?? false,
+                    }))
+                );
+
+            const nav = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPagePrev:${gid}:${ownerId}:${p}`)
+                    .setLabel('◀ 前へ')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(p <= 0),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPageNext:${gid}:${ownerId}:${p}`)
+                    .setLabel('次へ ▶')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(p >= totalPages - 1),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefPageClear:${gid}:${ownerId}`)
+                    .setLabel('解除')
+                    .setStyle(ButtonStyle.Secondary),
+
+                new ButtonBuilder()
+                    .setCustomId(`search:prefBack:${gid}:${ownerId}`)
+                    .setLabel('戻る')
+                    .setStyle(ButtonStyle.Secondary),
+            );
+
+            await interaction.update({
+                content: '都道府県を選択してください',
+                embeds: [],
+                components: [new ActionRowBuilder().addComponents(select), nav],
+            });
+
+            return;
+        }
+
+        if (id.startsWith('search:setText:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            // ここで元の検索パネル参照を保存
+            searchKeywordPromptRef.set(k, {
+                webhook: interaction.webhook,
+                messageId: interaction.message?.id,
+            });
+
+            const modal = new ModalBuilder()
+                .setCustomId(`modalSearch:${guildId}:${ownerId}`)
+                .setTitle('🔎 検索条件');
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('keyword')
+                        .setLabel('キーワード（スペース区切り）')
+                        .setPlaceholder('例：ラーメン 東京 深夜')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(false)
+                        .setValue(st.keyword ?? '')
+                )
+            );
+
+            return interaction.showModal(modal);
+        }
+
+        if (id.startsWith('search:clear:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const st = {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+            searchState.set(k, st);
+            return interaction.update({ embeds: [searchPanelEmbed(st)], components: searchPanelComponents(guildId, userId, st) });
+        }
+
+        if (id.startsWith('search:back:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        if (id.startsWith('search:run:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            const keywords = (st.keyword ?? '')
+                .normalize('NFKC')
+                .toLowerCase()
+                .trim()
+                .split(/[ \u3000]+/)
+                .filter(Boolean);
+
+            const results = [...cache.values()]
+                .filter(p => {
+                    if (st.userIdFilter?.length) {
+                        if (!st.userIdFilter.includes(p.created_by)) return false;
+                    }
+
+                    if (st.prefectureFilters?.length) {
+                        const pp = (p.prefecture ?? '').trim();
+                        if (!st.prefectureFilters.includes(pp)) return false;
+                    }
+
+                    if (st.tagFilters?.length) {
+                        const tags = (p.tags ?? [])
+                            .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
+                            .filter(Boolean);
+
+                        const selectedTags = (st.tagFilters ?? [])
+                            .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
+                            .filter(Boolean);
+
+                        if (selectedTags.length && !selectedTags.some(tag => tags.includes(tag))) {
+                            return false;
+                        }
+                    }
+
+                    if (keywords.length) {
+                        const hay = [
+                            p.name ?? '',
+                            p.comment ?? '',
+                            p.prefecture ?? '',
+                            ...(p.tags ?? [])
+                        ]
+                            .join('\n')
+                            .normalize('NFKC')
+                            .toLowerCase();
+
+                        for (const kw of keywords) {
+                            if (!hay.includes(kw)) return false;
+                        }
+                    }
+
+                    if (st.ratingFilters?.length) {
+                        if (!st.ratingFilters.includes(Number(p.rating))) return false;
+                    }
+
+                    return true;
+                })
+                .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+
+            st.results = results.map(p => p.id);
+            st.page = 0;
+            searchState.set(k, st);
+
+            if (!st.results.length) {
+                await interaction.update({
+                    content: '該当する記録がありません',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                return;
+            }
+
+            return renderSearchResultList(interaction, guildId, userId, { update: true });
+        }
+
+        // ⭐評価フィルター
+        if (id.startsWith('search:setRating:')) {
+            const [, , gid, ownerId, ratingStr] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const rating = Number(ratingStr);
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            st.ratingFilters = Array.isArray(st.ratingFilters) ? st.ratingFilters : [];
+
+            if (st.ratingFilters.includes(rating)) {
+                st.ratingFilters = st.ratingFilters.filter(x => x !== rating);
+            } else {
+                st.ratingFilters.push(rating);
+                st.ratingFilters.sort((a, b) => a - b);
+            }
+
+            searchState.set(k, st);
+
+            return interaction.update({
+                embeds: [searchPanelEmbed(st)],
+                components: searchPanelComponents(guildId, userId, st),
+            });
+        }
+
+        if (id.startsWith('res:prev:') || id.startsWith('res:next:')) {
+            const [, action, gid, ownerId, postId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+
+            const urls = imageUrls(post);
+            if (urls.length <= 1) {
+                const nav = getDetailNavState(guildId, userId, postId);
+                const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+                const forceHomeBack = nav?.forceHomeBack ?? false;
+
+                const { detail, components } = renderDetail(interaction, {
+                    post,
+                    guildId,
+                    userId,
+                    fromMine,
+                    total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                    forceHomeBack,
+                });
+
+                return interaction.update({
+                    content: '',
+                    embeds: [detail],
+                    components,
                 });
             }
 
-            const query = interaction.fields.getTextInputValue('placeQuery')?.trim() ?? '';
-            if (!query) {
-                return interaction.reply({ ephemeral: true, content: '検索語を入力してください' });
+            const pv = detailPhotoView.get(k) ?? { postId, idx: Math.max(0, urls.length - 1) };
+            pv.postId = postId;
+
+            if (action === 'prev') {
+                pv.idx = (pv.idx - 1 + urls.length) % urls.length;
+            } else {
+                pv.idx = (pv.idx + 1) % urls.length;
             }
 
-            await interaction.deferReply({ ephemeral: true });
+            detailPhotoView.set(k, pv);
 
-            try {
-                const first = await searchGooglePlacesText(query);
+            const nav = getDetailNavState(guildId, userId, postId);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
+
+            const { detail, components } = renderDetail(interaction, {
+                post,
+                guildId,
+                userId,
+                fromMine,
+                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                forceHomeBack,
+            });
+
+            return interaction.update({
+                content: '',
+                embeds: [detail],
+                components,
+            });
+        }
+
+        // Share
+        if (id.startsWith('res:share:')) {
+            const [, , gid, ownerId, postId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            cacheReadyByGuild.set(guildId, false);
+            await ensureCacheLoadedForGuild(interaction.guild);
+
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+
+            const chunks = buildDetailEmbedsChunks(post, { sharedByUserId: userId });
+            for (const embeds of chunks) {
+                await interaction.channel.send({ embeds });
+            }
+
+            const nav = getDetailNavState(guildId, userId, postId);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
+
+            const { detail, components } = renderDetail(interaction, {
+                post,
+                guildId,
+                userId,
+                fromMine,
+                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                forceHomeBack,
+                notice: 'このチャンネルに送信しました',
+            });
+
+            await interaction.update({
+                content: '',
+                embeds: [detail],
+                components,
+            });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        // Edit from result (only if canEdit)
+        if (id.startsWith('res:edit:')) {
+            const [, , gid, ownerId, postId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+            if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '編集できません（投稿者のみ）' });
+
+            const nav = getDetailNavState(guildId, userId, postId);
+            setDetailNavState(guildId, userId, postId, {
+                fromMine: nav?.fromMine ?? cameFromMine(k, postId, mineState),
+                forceHomeBack: nav?.forceHomeBack ?? false,
+            });
+
+            draftRating.set(k, {
+                mode: 'edit',
+                postId,
+                visited: post.visited !== false,
+                rating: post.rating ?? null,
+                comment: post.comment ?? '',
+                prefecture: post.prefecture ?? '',
+                visitedDate: post.visited_date ?? '',
+                tags: post.tags ?? [],
+                url: post.url ?? '',
+                mapUrl: post.map_url ?? '',
+                name: post.name ?? '',
+                channelId: interaction.channelId,
+            });
+
+            await renderEditPanel(interaction, guildId, userId, { update: true });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        // Photos from result (only if canEdit)
+        if (id.startsWith('res:photos:')) {
+            const [, , gid, ownerId, postId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+            if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
+
+            const urls = imageUrls(post);
+
+            photoView.set(k, { postId, idx: Math.max(0, urls.length - 1) });
+            const pv = photoView.get(k);
+            const total = urls.length;
+
+            const embed = new EmbedBuilder()
+                .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+                .setDescription(total ? `写真 ${pv.idx + 1}/${total}` : '写真はありません');
+
+            if (total && urls[pv.idx]) {
+                embed.setImage(urls[pv.idx]);
+            }
+
+            return interaction.update({
+                embeds: [embed],
+                components: photoManagerComponents(guildId, ownerId, postId, total),
+            });
+        }
+
+        if (id.startsWith('res:delete:')) {
+            const [, , gid, ownerId, postId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+            if (!canEdit(interaction, post)) {
+                return interaction.reply({ ephemeral: true, content: '削除できるのは登録者または管理者のみです' });
+            }
+
+            const urls = imageUrls(post);
+            const k = keyOf(guildId, userId);
+            const pv = detailPhotoView.get(k);
+            const idx = pv?.postId === postId
+                ? Math.max(0, Math.min(urls.length - 1, Number(pv.idx) || 0))
+                : Math.max(0, urls.length - 1);
+
+            return interaction.update({
+                content: '',
+                embeds: [confirmDeletePostEmbed(post, { imageIndex: idx })],
+                components: confirmComponents('deletePost', guildId, userId, postId, String(idx), urls.length > 1),
+            });
+        }
+
+        if (id.startsWith('search:listBack:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            return renderSearchResultList(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('search:backToPanel:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            return interaction.update({
+                content: '',
+                embeds: [searchPanelEmbed(st)],
+                components: searchPanelComponents(guildId, userId, st),
+            });
+        }
+
+        if (id.startsWith('search:home:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await interaction.update({
+                content: '',
+                embeds: [homeEmbed()],
+                components: homeComponents(),
+            });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        // Photo manager
+        if (id.startsWith('ph:')) {
+            const [, action, gid, ownerId, postId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+            if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+            if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
+
+            const pv = photoView.get(k) ?? { postId, idx: 0 };
+            pv.postId = postId;
+
+            const urls = imageUrls(post);
+            const total = urls.length;
+
+            if (action === 'prev' && total) pv.idx = (pv.idx - 1 + total) % total;
+            if (action === 'next' && total) pv.idx = (pv.idx + 1) % total;
+
+            if (action === 'add') {
+
+                const waitPayload = {
+                    content: '',
+                    embeds: [photoAddWaitingEmbed(post.name)],
+                    components: photoWaitingComponents(guildId, userId),
+                };
+
+                await interaction.update(waitPayload);
+
+                awaitingPhoto.set(k, {
+                    postId,
+                    channelId: interaction.channelId,
+                    guildId,
+                    backTo: 'detail',
+                    uiMessageRef: {
+                        webhook: interaction.webhook,
+                        messageId: interaction.message?.id,
+                    },
+                });
+
+                return;
+            }
+
+            if (action === 'del') {
+                const urls = imageUrls(post);
+                if (!urls.length) {
+                    return interaction.reply({ ephemeral: true, content: '写真がありません' });
+                }
+
+                const idx = Math.max(0, Math.min(urls.length - 1, Number(pv.idx) || 0));
+
+                deletePhotoConfirmState.set(k, { postId, idx });
+
+                return interaction.update({
+                    content: '',
+                    embeds: [confirmPhotoDeleteEmbed(post, idx)],
+                    components: deletePhotoConfirmComponents(guildId, ownerId),
+                });
+            }
+
+            if (action === 'delall') {
+                const imgs = post.images ?? [];
+
+                if (!imgs.length) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: '写真がありません'
+                    });
+                }
+
+                return interaction.update({
+                    content: '',
+                    embeds: [confirmDeleteAllPhotosEmbed(post)],
+                    components: confirmComponents(
+                        'deleteAllPhotos',
+                        guildId,
+                        ownerId,
+                        postId,
+                        '0',
+                        imgs.length > 1
+                    ),
+                });
+            }
+
+            if (action === 'back') {
+                const nav = getDetailNavState(guildId, userId, postId);
+                const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+                const forceHomeBack = nav?.forceHomeBack ?? false;
+
+                const { detail, components } = renderDetail(interaction, {
+                    post,
+                    guildId,
+                    userId,
+                    fromMine,
+                    total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                    forceHomeBack,
+                });
+
+                await interaction.update({ embeds: [detail], components });
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                return;
+            }
+
+            photoView.set(k, pv);
+
+            const urls2 = imageUrls(post);
+            const newTotal = urls2.length;
+
+            // idx補正（削除後とかで範囲外になるのを防ぐ）
+            if (pv.idx >= newTotal) pv.idx = Math.max(0, newTotal - 1);
+
+            const embed = new EmbedBuilder()
+                .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+                .setDescription(newTotal ? `写真 ${pv.idx + 1}/${newTotal}` : '写真はありません');
+
+            if (newTotal && urls2[pv.idx]) {
+                embed.setImage(urls2[pv.idx]);
+            }
+
+            return interaction.update({
+                embeds: [embed],
+                components: photoManagerComponents(guildId, ownerId, postId, newTotal),
+            });
+        }
+
+        if (id.startsWith('mine:filter:')) {
+            const [, , filter, gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            const st = mineState.get(k);
+            if (!st) {
+                return interaction.reply({ ephemeral: true, content: '一覧がありません' });
+            }
+
+            if (!['all', 'visited', 'planned'].includes(filter)) {
+                return interaction.reply({ ephemeral: true, content: 'フィルタが不正です' });
+            }
+
+            st.visitFilter = filter;
+            st.page = 0;
+            mineState.set(k, st);
+
+            return renderMineList(interaction, guildId, userId, { update: true });
+        }
+
+        // Mine list paging/back
+        if (id.startsWith('mine:prev:') || id.startsWith('mine:next:')) {
+            const [, dir, gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const st = mineState.get(k);
+            if (!st?.results?.length) return interaction.reply({ ephemeral: true, content: '一覧がありません' });
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+
+            const filteredIds = st.results.filter(pid => {
+                const p = cache.get(pid);
+                if (!p) return false;
+                return visitFilterMatch(st, p);
+            });
+
+            const pageSize = 9;
+            const maxPage = Math.max(0, Math.ceil(filteredIds.length / pageSize) - 1);
+
+            st.page = Number(st.page) || 0;
+            st.page += dir === 'prev' ? -1 : +1;
+            if (st.page < 0) st.page = 0;
+            if (st.page > maxPage) st.page = maxPage;
+            mineState.set(k, st);
+
+            return renderMineList(interaction, guildId, userId, { update: true });
+        }
+
+        if (id.startsWith('mine:home:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        if (id.startsWith('mine:back:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            await renderMineList(interaction, guildId, userId, { update: true });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        // User select menu (search filter user)
+        if (interaction.isUserSelectMenu()) {
+            const id = interaction.customId;
+            if (!id.startsWith('search:userPick:')) return;
+
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const pickedIds = (interaction.values ?? []).filter(Boolean);
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
+
+            st.userIdFilter = pickedIds.length ? pickedIds : null;
+            searchState.set(k, st);
+
+            return interaction.update({
+                content: '',
+                embeds: [searchPanelEmbed(st)],
+                components: searchPanelComponents(guildId, userId, st),
+            });
+        }
+
+        // String select menu (mine list pick)
+        if (interaction.isStringSelectMenu()) {
+            const id = interaction.customId;
+            if (id.startsWith('create:searchPlace:') || id.startsWith('edit:searchPlace:')) {
+                const parts = id.split(':');
+                const mode = parts[0];
+                const gid = parts[2];
+                const ownerId = parts[3];
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                    });
+                }
 
                 placeSearchState.set(k, {
                     mode,
-                    query,
-                    results: first.results ?? [],
+                    query: d.name ?? '',
+                    results: [],
                     page: 0,
-                    nextPageToken: first.nextPageToken ?? '',
+                    nextPageToken: '',
                     loadingMore: false,
                 });
 
+                return interaction.showModal(
+                    buildPlaceSearchModal(gid, ownerId, mode, d.name ?? '')
+                );
+            }
+
+            if (id.startsWith('place:pick:')) {
+                const [, , gid, ownerId] = id.split(':');
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const picked = interaction.values?.[0];
+                if (!picked || picked === 'none') {
+                    return interaction.reply({ ephemeral: true, content: '候補を選択してください' });
+                }
+
                 const st = placeSearchState.get(k);
-
-                const ref = mode === 'create'
-                    ? createPanelPromptRef.get(k)
-                    : editPanelPromptRef.get(k);
-
-                const updated = await editPromptRef(ref, {
-                    content: '',
-                    embeds: [buildPlaceSearchEmbed(st)],
-                    components: placeSearchComponents(guildId, userId, st),
-                });
-
-                if (updated) {
-                    try { await interaction.deleteReply(); } catch { }
-                    return;
+                if (!st) {
+                    return interaction.reply({ ephemeral: true, content: 'お店検索状態がありません' });
                 }
 
-                await interaction.editReply({
-                    content: '',
-                    embeds: [buildPlaceSearchEmbed(st)],
-                    components: placeSearchComponents(guildId, userId, st),
-                });
+                const idx = Number(picked);
+                const selected = st.results?.[idx];
 
-                const sent = await interaction.fetchReply().catch(() => null);
-                if (sent?.id) {
-                    addUiMessageId(guildId, userId, sent.id);
+                if (!selected) {
+                    return interaction.reply({ ephemeral: true, content: '候補が見つかりません' });
                 }
 
-                return;
-            } catch (e) {
+                const d = draftRating.get(k);
+                if (!d || d.mode !== st.mode) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: st.mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                    });
+                }
+
+                d.name = selected.name || d.name || '';
+                d.mapUrl = selected.mapUrl || d.mapUrl || '';
+                d.place = {
+                    placeId: selected.placeId,
+                    name: selected.name,
+                    address: selected.address,
+                    mapUrl: selected.mapUrl,
+                };
+                draftRating.set(k, d);
+                placeSearchState.delete(k);
+
+                if (st.mode === 'create') {
+                    return renderCreatePanel(interaction, guildId, userId, { update: true });
+                }
+
+                return renderEditPanel(interaction, guildId, userId, { update: true });
+            }
+
+            // ===== 検索：都道府県ピック =====
+            if (id.startsWith('search:prefPick:')) {
+                const parts = id.split(':');
+                const gid = parts[2];
+                const ownerId = parts[3];
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const picked = interaction.values ?? [];
+                const page = Number(parts[4] || 0);
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0
+                };
+
+                const { slice } = prefSlice(page);
+                const current = new Set(st.prefectureFilters ?? []);
+
+                // 今のページにある都道府県は一旦外す
+                for (const pref of slice) {
+                    current.delete(pref);
+                }
+
+                // 今回選んだものを追加
+                for (const pref of picked) {
+                    current.add(pref);
+                }
+
+                st.prefectureFilters = [...current];
+                searchState.set(k, st);
+
+                return interaction.update({
+                    content: st.prefectureFilters.length
+                        ? `都道府県を設定しました: ${st.prefectureFilters.join(' / ')}`
+                        : '都道府県を解除しました',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+            }
+
+            if (id.startsWith('create:prefPick:') || id.startsWith('edit:prefPick:')) {
+                const parts = id.split(':');
+                const mode = parts[0];
+                const gid = parts[2];
+                const ownerId = parts[3];
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const picked = interaction.values?.[0] ?? '';
+                const d = draftRating.get(k);
+
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({ ephemeral: true, content: '途中状態がありません' });
+                }
+
+                d.prefecture = picked;
+                draftRating.set(k, d);
+
+                if (mode === 'create') {
+                    return renderCreatePanel(interaction, guildId, userId, { update: true });
+                }
+
+                return renderEditPanel(interaction, guildId, userId, { update: true });
+            }
+
+            if (id.startsWith('search:pick:')) {
+                const [, , gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const postId = interaction.values?.[0];
+                if (!postId || postId === 'none') {
+                    return interaction.reply({ ephemeral: true, content: '選択が不正です' });
+                }
+
+                await ensureCacheLoadedForGuild(interaction.guild);
+                const cache = getGuildCache(guildId);
+                const post = cache.get(postId);
+                if (!post) {
+                    return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+                }
+
+                const { detail, components } = renderDetail(interaction, {
+                    post,
+                    guildId,
+                    userId,
+                    fromMine: false,
+                    total: searchState.get(k)?.results?.length || 1,
+                    forceHomeBack: false,
+                });
+
+                return interaction.update({
+                    content: '',
+                    embeds: [detail],
+                    components,
+                });
+            }
+
+            if (!id.startsWith('mine:pick:')) return;
+
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+            const postId = interaction.values?.[0];
+            if (!postId || postId === 'none') return interaction.reply({ ephemeral: true, content: '選択が不正です' });
+
+            await interaction.deferUpdate();
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+            if (!post) {
                 return interaction.editReply({
-                    content: `店検索に失敗しました: ${e.message}`,
+                    content: 'データが見つかりません',
                     embeds: [],
-                    components: [],
-                });
-            }
-        }
-
-        if (id.startsWith('modalCreateComment:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'create') {
-                return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
-            }
-
-            const comment = interaction.fields.getTextInputValue('comment')?.trim() ?? '';
-
-            if (comment.length > 500) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: `コメントは500文字以内で入力してください（現在 ${comment.length}文字）`
+                    components: homeComponents(),
                 });
             }
 
-            d.comment = comment;
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
+            const { detail, components } = renderDetail(interaction, {
+                post,
+                guildId,
+                userId,
+                fromMine: true,
+                total: 1,
+                forceHomeBack: false,
+            });
 
             await interaction.editReply({
                 content: '',
-                embeds: [buildCreatePanelEmbed(d)],
-                components: createPanelComponents(guildId, userId, d),
+                embeds: [detail],
+                components,
             });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                createPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
             return;
         }
+        // Modal submit
+        if (interaction.isModalSubmit()) {
+            const id = interaction.customId;
 
-        if (id.startsWith('modalCreateTags:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            if (id.startsWith('modalPlaceSearch:')) {
+                const [, gid, ownerId, mode] = id.split(':');
 
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'create') {
-                return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
+                    });
+                }
+
+                const query = interaction.fields.getTextInputValue('placeQuery')?.trim() ?? '';
+                if (!query) {
+                    return interaction.reply({ ephemeral: true, content: '検索語を入力してください' });
+                }
+
+                await interaction.deferReply({ ephemeral: true });
+
+                try {
+                    const first = await searchGooglePlacesText(query);
+
+                    placeSearchState.set(k, {
+                        mode,
+                        query,
+                        results: first.results ?? [],
+                        page: 0,
+                        nextPageToken: first.nextPageToken ?? '',
+                        loadingMore: false,
+                    });
+
+                    const st = placeSearchState.get(k);
+
+                    const ref = mode === 'create'
+                        ? createPanelPromptRef.get(k)
+                        : editPanelPromptRef.get(k);
+
+                    const updated = await editPromptRef(ref, {
+                        content: '',
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+
+                    if (updated) {
+                        try { await interaction.deleteReply(); } catch { }
+                        return;
+                    }
+
+                    await interaction.editReply({
+                        content: '',
+                        embeds: [buildPlaceSearchEmbed(st)],
+                        components: placeSearchComponents(guildId, userId, st),
+                    });
+
+                    const sent = await interaction.fetchReply().catch(() => null);
+                    if (sent?.id) {
+                        addUiMessageId(guildId, userId, sent.id);
+                    }
+
+                    return;
+                } catch (e) {
+                    return interaction.editReply({
+                        content: `店検索に失敗しました: ${e.message}`,
+                        embeds: [],
+                        components: [],
+                    });
+                }
             }
 
-            d.tags = parseTags(interaction.fields.getTextInputValue('tags'));
-            draftRating.set(k, d);
+            if (id.startsWith('modalCreateComment:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-            await interaction.deferReply({ ephemeral: true });
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'create') {
+                    return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+                }
 
-            const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
+                const comment = interaction.fields.getTextInputValue('comment')?.trim() ?? '';
 
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
+                if (comment.length > 500) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: `コメントは500文字以内で入力してください（現在 ${comment.length}文字）`
+                    });
+                }
 
-            await interaction.editReply({
-                content: '',
-                embeds: [buildCreatePanelEmbed(d)],
-                components: createPanelComponents(guildId, userId, d),
-            });
+                d.comment = comment;
+                draftRating.set(k, d);
 
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                createPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-            return;
-        }
+                await interaction.deferReply({ ephemeral: true });
 
-        if (id.startsWith('modalCreateUrl:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'create') {
-                return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
-            }
-
-            d.url = interaction.fields.getTextInputValue('url')?.trim() ?? '';
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
-
-            await interaction.editReply({
-                content: '',
-                embeds: [buildCreatePanelEmbed(d)],
-                components: createPanelComponents(guildId, userId, d),
-            });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                createPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-        }
-
-        if (id.startsWith('modalCreateMap:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'create') {
-                return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
-            }
-
-            d.mapUrl = interaction.fields.getTextInputValue('mapUrl')?.trim() ?? '';
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
-
-            await interaction.editReply({
-                content: '',
-                embeds: [buildCreatePanelEmbed(d)],
-                components: createPanelComponents(guildId, userId, d),
-            });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                createPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-            return;
-        }
-
-        if (id.startsWith('modalCreateName:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'create') {
-                return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
-            }
-
-            const name = interaction.fields.getTextInputValue('name')?.trim();
-            if (!name) {
-                return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
-            }
-
-            d.name = name;
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
-
-            await interaction.editReply({
-                content: '',
-                embeds: [buildCreatePanelEmbed(d)],
-                components: createPanelComponents(guildId, userId, d),
-            });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                createPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-            return;
-        }
-
-        if (id.startsWith('modalEditName:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'edit') {
-                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-            }
-
-            const name = interaction.fields.getTextInputValue('name')?.trim();
-            if (!name) {
-                return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
-            }
-
-            d.name = name;
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
-
-            await interaction.editReply({
-                content: '',
-                embeds: [buildEditPanelEmbed(d)],
-                components: editPanelComponents(guildId, userId, d),
-            });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                editPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-            return;
-        }
-
-        if (id.startsWith('modalEditComment:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'edit') {
-                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-            }
-
-            const comment = interaction.fields.getTextInputValue('comment')?.trim() ?? '';
-
-            if (comment.length > 500) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: `コメントは500文字以内で入力してください（現在 ${comment.length}文字）`
-                });
-            }
-
-            d.comment = comment;
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
-
-            await interaction.editReply({
-                content: '',
-                embeds: [buildEditPanelEmbed(d)],
-                components: editPanelComponents(guildId, userId, d),
-            });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                editPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-        }
-
-        if (id.startsWith('modalEditTags:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'edit') {
-                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-            }
-
-            d.tags = parseTags(interaction.fields.getTextInputValue('tags'));
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
-
-            await interaction.editReply({
-                content: '',
-                embeds: [buildEditPanelEmbed(d)],
-                components: editPanelComponents(guildId, userId, d),
-            });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                editPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-        }
-
-        if (id.startsWith('modalEditUrl:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'edit') {
-                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-            }
-
-            d.url = interaction.fields.getTextInputValue('url')?.trim() ?? '';
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
-
-            await interaction.editReply({
-                content: '',
-                embeds: [buildEditPanelEmbed(d)],
-                components: editPanelComponents(guildId, userId, d),
-            });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                editPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-        }
-
-        if (id.startsWith('modalEditMap:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== 'edit') {
-                return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
-            }
-
-            d.mapUrl = interaction.fields.getTextInputValue('mapUrl')?.trim() ?? '';
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
-
-            if (ok) {
-                try { await interaction.deleteReply(); } catch { }
-                return;
-            }
-
-            await interaction.editReply({
-                content: '',
-                embeds: [buildEditPanelEmbed(d)],
-                components: editPanelComponents(guildId, userId, d),
-            });
-
-            const msg = await interaction.fetchReply().catch(() => null);
-            if (msg?.id) {
-                addUiMessageId(guildId, userId, msg.id);
-                editPanelPromptRef.set(k, {
-                    webhook: interaction.webhook,
-                    messageId: msg.id,
-                });
-            }
-            return;
-        }
-
-        if (id.startsWith('modalVisitedDate:')) {
-            const [, gid, ownerId, mode] = id.split(':');
-
-            if (interaction.guildId !== gid) {
-                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            }
-            if (userId !== ownerId) {
-                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
-            }
-
-            const d = draftRating.get(k);
-            if (!d || d.mode !== mode) {
-                return interaction.reply({ ephemeral: true, content: '途中状態がありません' });
-            }
-
-            const raw = interaction.fields.getTextInputValue('visitedDate');
-            const normalized = normalizeVisitedDate(raw);
-
-            if (normalized === null) {
-                return interaction.reply({
-                    ephemeral: true,
-                    content: '行った日付は YYYY/MM/DD または YYYY-MM-DD 形式で入力してください',
-                });
-            }
-
-            d.visitedDate = normalized || '';
-            draftRating.set(k, d);
-
-            await interaction.deferReply({ ephemeral: true });
-
-            if (mode === 'create') {
                 const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
 
                 if (ok) {
@@ -6473,7 +6019,186 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
 
-            if (mode === 'edit') {
+            if (id.startsWith('modalCreateTags:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'create') {
+                    return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+                }
+
+                d.tags = parseTags(interaction.fields.getTextInputValue('tags'));
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
+
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [buildCreatePanelEmbed(d)],
+                    components: createPanelComponents(guildId, userId, d),
+                });
+
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    createPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
+                return;
+            }
+
+            if (id.startsWith('modalCreateUrl:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'create') {
+                    return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+                }
+
+                d.url = interaction.fields.getTextInputValue('url')?.trim() ?? '';
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
+
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [buildCreatePanelEmbed(d)],
+                    components: createPanelComponents(guildId, userId, d),
+                });
+
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    createPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
+            }
+
+            if (id.startsWith('modalCreateMap:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'create') {
+                    return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+                }
+
+                d.mapUrl = interaction.fields.getTextInputValue('mapUrl')?.trim() ?? '';
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
+
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [buildCreatePanelEmbed(d)],
+                    components: createPanelComponents(guildId, userId, d),
+                });
+
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    createPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
+                return;
+            }
+
+            if (id.startsWith('modalCreateName:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'create') {
+                    return interaction.reply({ ephemeral: true, content: '新規登録状態がありません' });
+                }
+
+                const name = interaction.fields.getTextInputValue('name')?.trim();
+                if (!name) {
+                    return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
+                }
+
+                d.name = name;
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
+
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [buildCreatePanelEmbed(d)],
+                    components: createPanelComponents(guildId, userId, d),
+                });
+
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    createPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
+                return;
+            }
+
+            if (id.startsWith('modalEditName:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'edit') {
+                    return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+                }
+
+                const name = interaction.fields.getTextInputValue('name')?.trim();
+                if (!name) {
+                    return interaction.reply({ ephemeral: true, content: 'お店の名前は必須です' });
+                }
+
+                d.name = name;
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
                 const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
 
                 if (ok) {
@@ -6497,99 +6222,343 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
                 return;
             }
-        }
 
-        if (id.startsWith('modalSearch:')) {
-            const [, gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            if (id.startsWith('modalEditComment:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
-            const keyword = interaction.fields.getTextInputValue('keyword')?.trim() ?? '';
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'edit') {
+                    return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+                }
 
-            const st = searchState.get(k) ?? {
-                userIdFilter: null,
-                prefectureFilters: [],
-                tagFilters: [],
-                keyword: '',
-                ratingFilters: [],
-                results: [],
-                page: 0
-            };
-            st.keyword = keyword;
-            searchState.set(k, st);
+                const comment = interaction.fields.getTextInputValue('comment')?.trim() ?? '';
 
-            await interaction.deferReply({ ephemeral: true });
+                if (comment.length > 500) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: `コメントは500文字以内で入力してください（現在 ${comment.length}文字）`
+                    });
+                }
 
-            const ref = searchKeywordPromptRef.get(k);
+                d.comment = comment;
+                draftRating.set(k, d);
 
-            const updated = await editPromptRef(ref, {
-                content: '',
-                embeds: [searchPanelEmbed(st)],
-                components: searchPanelComponents(guildId, userId, st),
-            });
+                await interaction.deferReply({ ephemeral: true });
 
-            searchKeywordPromptRef.delete(k);
+                const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
 
-            if (updated) {
-                try {
-                    await interaction.deleteReply();
-                } catch { }
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [buildEditPanelEmbed(d)],
+                    components: editPanelComponents(guildId, userId, d),
+                });
+
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    editPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
+            }
+
+            if (id.startsWith('modalEditTags:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'edit') {
+                    return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+                }
+
+                d.tags = parseTags(interaction.fields.getTextInputValue('tags'));
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
+
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [buildEditPanelEmbed(d)],
+                    components: editPanelComponents(guildId, userId, d),
+                });
+
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    editPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
+            }
+
+            if (id.startsWith('modalEditUrl:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'edit') {
+                    return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+                }
+
+                d.url = interaction.fields.getTextInputValue('url')?.trim() ?? '';
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
+
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [buildEditPanelEmbed(d)],
+                    components: editPanelComponents(guildId, userId, d),
+                });
+
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    editPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
+            }
+
+            if (id.startsWith('modalEditMap:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== 'edit') {
+                    return interaction.reply({ ephemeral: true, content: '編集状態がありません' });
+                }
+
+                d.mapUrl = interaction.fields.getTextInputValue('mapUrl')?.trim() ?? '';
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
+
+                if (ok) {
+                    try { await interaction.deleteReply(); } catch { }
+                    return;
+                }
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [buildEditPanelEmbed(d)],
+                    components: editPanelComponents(guildId, userId, d),
+                });
+
+                const msg = await interaction.fetchReply().catch(() => null);
+                if (msg?.id) {
+                    addUiMessageId(guildId, userId, msg.id);
+                    editPanelPromptRef.set(k, {
+                        webhook: interaction.webhook,
+                        messageId: msg.id,
+                    });
+                }
                 return;
             }
 
-            // 元メッセージ更新に失敗したときだけ新規reply
-            await interaction.editReply({
-                content: '',
-                embeds: [searchPanelEmbed(st)],
-                components: searchPanelComponents(guildId, userId, st),
-            });
+            if (id.startsWith('modalVisitedDate:')) {
+                const [, gid, ownerId, mode] = id.split(':');
 
-            const sent = await interaction.fetchReply().catch(() => null);
-            if (sent?.id) {
-                addUiMessageId(guildId, userId, sent.id);
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                }
+
+                const d = draftRating.get(k);
+                if (!d || d.mode !== mode) {
+                    return interaction.reply({ ephemeral: true, content: '途中状態がありません' });
+                }
+
+                const raw = interaction.fields.getTextInputValue('visitedDate');
+                const normalized = normalizeVisitedDate(raw);
+
+                if (normalized === null) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: '行った日付は YYYY/MM/DD または YYYY-MM-DD 形式で入力してください',
+                    });
+                }
+
+                d.visitedDate = normalized || '';
+                draftRating.set(k, d);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                if (mode === 'create') {
+                    const ok = await rerenderCreatePanelFromRef(interaction, guildId, userId);
+
+                    if (ok) {
+                        try { await interaction.deleteReply(); } catch { }
+                        return;
+                    }
+
+                    await interaction.editReply({
+                        content: '',
+                        embeds: [buildCreatePanelEmbed(d)],
+                        components: createPanelComponents(guildId, userId, d),
+                    });
+
+                    const msg = await interaction.fetchReply().catch(() => null);
+                    if (msg?.id) {
+                        addUiMessageId(guildId, userId, msg.id);
+                        createPanelPromptRef.set(k, {
+                            webhook: interaction.webhook,
+                            messageId: msg.id,
+                        });
+                    }
+                    return;
+                }
+
+                if (mode === 'edit') {
+                    const ok = await rerenderEditPanelFromRef(interaction, guildId, userId);
+
+                    if (ok) {
+                        try { await interaction.deleteReply(); } catch { }
+                        return;
+                    }
+
+                    await interaction.editReply({
+                        content: '',
+                        embeds: [buildEditPanelEmbed(d)],
+                        components: editPanelComponents(guildId, userId, d),
+                    });
+
+                    const msg = await interaction.fetchReply().catch(() => null);
+                    if (msg?.id) {
+                        addUiMessageId(guildId, userId, msg.id);
+                        editPanelPromptRef.set(k, {
+                            webhook: interaction.webhook,
+                            messageId: msg.id,
+                        });
+                    }
+                    return;
+                }
             }
-            return;
+
+            if (id.startsWith('modalSearch:')) {
+                const [, gid, ownerId] = id.split(':');
+                if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+
+                const keyword = interaction.fields.getTextInputValue('keyword')?.trim() ?? '';
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0
+                };
+                st.keyword = keyword;
+                searchState.set(k, st);
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const ref = searchKeywordPromptRef.get(k);
+
+                const updated = await editPromptRef(ref, {
+                    content: '',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+
+                searchKeywordPromptRef.delete(k);
+
+                if (updated) {
+                    try {
+                        await interaction.deleteReply();
+                    } catch { }
+                    return;
+                }
+
+                // 元メッセージ更新に失敗したときだけ新規reply
+                await interaction.editReply({
+                    content: '',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+
+                const sent = await interaction.fetchReply().catch(() => null);
+                if (sent?.id) {
+                    addUiMessageId(guildId, userId, sent.id);
+                }
+                return;
+            }
+        } // interaction.isModalSubmit() 終了
+    } catch (e) {
+        console.error('InteractionCreate error', {
+            customId: interaction?.customId,
+            type: interaction?.type,
+            userId: interaction?.user?.id,
+            guildId: interaction?.guildId,
+            message: e?.message,
+            stack: e?.stack,
+        });
+
+        if (interaction.isRepliable()) {
+            try {
+                const gid = interaction.guildId;
+                const uid = interaction.user?.id;
+
+                let errMsg;
+                if (interaction.deferred || interaction.replied) {
+                    errMsg = await interaction.followUp({
+                        ephemeral: true,
+                        content: `エラー: ${e.message}`
+                    });
+                } else {
+                    errMsg = await interaction.reply({
+                        ephemeral: true,
+                        content: `エラー: ${e.message}`,
+                        fetchReply: true
+                    });
+                }
+
+                if (gid && uid && errMsg?.id) {
+                    addUiMessageId(gid, uid, errMsg.id);
+                }
+            } catch { }
         }
-    } // interaction.isModalSubmit() 終了
-} catch (e) {
-    console.error('InteractionCreate error', {
-        customId: interaction?.customId,
-        type: interaction?.type,
-        userId: interaction?.user?.id,
-        guildId: interaction?.guildId,
-        message: e?.message,
-        stack: e?.stack,
-    });
-
-    if (interaction.isRepliable()) {
-        try {
-            const gid = interaction.guildId;
-            const uid = interaction.user?.id;
-
-            let errMsg;
-            if (interaction.deferred || interaction.replied) {
-                errMsg = await interaction.followUp({
-                    ephemeral: true,
-                    content: `エラー: ${e.message}`
-                });
-            } else {
-                errMsg = await interaction.reply({
-                    ephemeral: true,
-                    content: `エラー: ${e.message}`,
-                    fetchReply: true
-                });
-            }
-
-            if (gid && uid && errMsg?.id) {
-                addUiMessageId(gid, uid, errMsg.id);
-            }
-        } catch {}
     }
-}
 });
 
 // ====== 写真添付拾う（ユーザーが画像投稿したら追加） ======
 client.on(Events.MessageCreate, async msg => {
+    let uploadingMsg = null;
+
     try {
         if (msg.author.bot) return;
         if (!msg.guildId) return;
@@ -6603,6 +6572,10 @@ client.on(Events.MessageCreate, async msg => {
 
         const imgs = [...(msg.attachments?.values() ?? [])].filter(a => isImageAttachment(a));
         if (!imgs.length) return;
+
+        uploadingMsg = await msg.reply({
+            content: '📷 写真を登録しています…少しお待ちください'
+        }).catch(() => null);
 
         for (const img of imgs) {
             const res = await fetch(img.url);
@@ -6635,22 +6608,25 @@ client.on(Events.MessageCreate, async msg => {
         const cache = getGuildCache(msg.guildId);
         const post = cache.get(wait.postId);
         if (!post) {
+            if (uploadingMsg) {
+                try { await uploadingMsg.delete(); } catch { }
+            }
             awaitingPhoto.delete(k);
             return;
         }
 
         if (wait.uiMessageRef) {
             if (wait.backTo === 'home') {
+                openDetailAfterCreateState.set(k, { postId: post.id });
+
                 await editPromptRef(wait.uiMessageRef, {
                     content: `✅ **${post.name}** に写真を追加しました`,
                     embeds: [
                         confirmEmbed('📄 詳細を開きますか？', `**${post.name}**`)
                     ],
-                    components: confirmComponents(
-                        'openDetailAfterCreate',
+                    components: openDetailAfterCreateComponents(
                         msg.guildId,
-                        msg.author.id,
-                        post.id
+                        msg.author.id
                     ),
                 });
             } else {
@@ -6689,6 +6665,10 @@ client.on(Events.MessageCreate, async msg => {
         try { await msg.delete(); } catch { }
     } catch (e) {
         console.error(e);
+
+        if (uploadingMsg) {
+            try { await uploadingMsg.delete(); } catch { }
+        }
     }
 });
 
