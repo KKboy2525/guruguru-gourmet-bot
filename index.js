@@ -800,11 +800,14 @@ else
 }
 }
 
-function imageUrls(post)
-{
+function imageUrls(post) {
     const imgs = post.images ?? [];
-    return imgs.map(x => (typeof x === 'string' ? x : x?.url)).filter(Boolean);
+    return imgs
+        .map(x => (typeof x === 'string' ? x : x?.url))
+        .filter(x => typeof x === 'string' && x.trim().length > 0)
+        .map(x => x.trim());
 }
+
 
 function buildDetailEmbedsChunks(post, { sharedByUserId = null } = { }) {
     const top = [];
@@ -4677,10 +4680,15 @@ client.on(Events.InteractionCreate, async interaction => {
         const urls = imageUrls(post);
         photoView.set(k, { postId: post.id, idx: Math.max(0, urls.length - 1) });
 
+        const idx = Math.max(0, urls.length - 1);
+
         const embed = new EmbedBuilder()
-            .setTitle(`🖼 写真管理: ${post.name}`)
-            .setDescription(urls.length ? `写真 ${Math.max(0, urls.length - 1) + 1}/${urls.length}` : '写真はありません')
-            .setImage(urls.length ? urls[Math.max(0, urls.length - 1)] : null);
+            .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+            .setDescription(urls.length ? `写真 ${idx + 1}/${urls.length}` : '写真はありません');
+
+        if (urls.length && urls[idx]) {
+            embed.setImage(urls[idx]);
+        }
 
         return interaction.update({
             embeds: [embed],
@@ -5365,9 +5373,12 @@ client.on(Events.InteractionCreate, async interaction => {
         const total = urls.length;
 
         const embed = new EmbedBuilder()
-            .setTitle(`🖼 写真管理: ${post.name}`)
-            .setDescription(total ? `写真 ${pv.idx + 1}/${total}` : '写真はありません')
-            .setImage(total ? urls[pv.idx] : null);
+            .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+            .setDescription(total ? `写真 ${pv.idx + 1}/${total}` : '写真はありません');
+
+        if (total && urls[pv.idx]) {
+            embed.setImage(urls[pv.idx]);
+        }
 
         return interaction.update({
             embeds: [embed],
@@ -5558,9 +5569,12 @@ client.on(Events.InteractionCreate, async interaction => {
         if (pv.idx >= newTotal) pv.idx = Math.max(0, newTotal - 1);
 
         const embed = new EmbedBuilder()
-            .setTitle(`🖼 写真管理: ${post.name}`)
-            .setDescription(newTotal ? `写真 ${pv.idx + 1}/${newTotal}` : '写真はありません')
-            .setImage(newTotal ? urls2[pv.idx] : null);
+            .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
+            .setDescription(newTotal ? `写真 ${pv.idx + 1}/${newTotal}` : '写真はありません');
+
+        if (newTotal && urls2[pv.idx]) {
+            embed.setImage(urls2[pv.idx]);
+        }
 
         return interaction.update({
             embeds: [embed],
@@ -6538,7 +6552,15 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     } // interaction.isModalSubmit() 終了
 } catch (e) {
-    console.error(e);
+    console.error('InteractionCreate error', {
+        customId: interaction?.customId,
+        type: interaction?.type,
+        userId: interaction?.user?.id,
+        guildId: interaction?.guildId,
+        message: e?.message,
+        stack: e?.stack,
+    });
+
     if (interaction.isRepliable()) {
         try {
             const gid = interaction.guildId;
@@ -6561,7 +6583,7 @@ client.on(Events.InteractionCreate, async interaction => {
             if (gid && uid && errMsg?.id) {
                 addUiMessageId(gid, uid, errMsg.id);
             }
-        } catch { }
+        } catch {}
     }
 }
 });
