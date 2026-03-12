@@ -218,26 +218,39 @@ async function getPostByIdForViewer(postId, guildId, viewerDiscordUserId) {
     if (!postId) return null;
 
     const fresh = await refreshPostCacheById(postId, guildId);
+    if (fresh) {
+        if (fresh.visibility === 'public') {
+            return fresh;
+        }
 
-    if (fresh && canViewPost(viewerDiscordUserId, guildId, fresh)) {
-        return fresh;
+        if (fresh.visibility === 'server' && String(fresh.server_id) === String(guildId)) {
+            return fresh;
+        }
+
+        if (fresh.visibility === 'private' && String(fresh.created_by) === String(viewerDiscordUserId)) {
+            return fresh;
+        }
     }
 
     const cache = getGuildCache(guildId);
     const cached = cache.get(postId);
+    if (cached) {
+        if (cached.visibility === 'public') {
+            return cached;
+        }
 
-    if (cached && canViewPost(viewerDiscordUserId, guildId, cached)) {
-        return cached;
+        if (cached.visibility === 'server' && String(cached.server_id) === String(guildId)) {
+            return cached;
+        }
+
+        if (cached.visibility === 'private' && String(cached.created_by) === String(viewerDiscordUserId)) {
+            return cached;
+        }
     }
 
     const privatePosts = await getPrivatePostsForViewer(guildId, viewerDiscordUserId);
     const mine = privatePosts.find(x => x.id === postId) ?? null;
-
-    if (mine && canViewPost(viewerDiscordUserId, guildId, mine)) {
-        return mine;
-    }
-
-    return null;
+    return mine ?? null;
 }
 
 function nowIso() {
@@ -1298,10 +1311,12 @@ async function refreshPostCacheById(postId, guildId) {
 
     const post = mapDbPostToView(data);
 
-    if (
-        post.visibility === 'private' ||
-        (post.visibility === 'server' && String(post.server_id) !== String(guildId))
-    ) {
+    if (post.visibility === 'private') {
+        cache.delete(postId);
+        return post;
+    }
+
+    if (post.visibility === 'server' && String(post.server_id) !== String(guildId)) {
         cache.delete(postId);
         return post;
     }
@@ -5440,7 +5455,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const results = [...merged.values()]
                 .filter(p => {
-if (!canViewPost(userId, guildId, p)) return false;
+                    if (!canViewPost(userId, guildId, p)) return false;
 
                     if (st.userIdFilter?.length) {
                         if (!st.userIdFilter.includes(p.created_by)) return false;
@@ -6299,9 +6314,9 @@ if (!canViewPost(userId, guildId, p)) return false;
                 });
             }
 
-if (!canViewPost(userId, guildId, post)) {
-    return interaction.reply({ ephemeral: true, content: 'この投稿は表示できません' });
-}
+            if (!canViewPost(userId, guildId, post)) {
+                return interaction.reply({ ephemeral: true, content: 'この投稿は表示できません' });
+            }
 
             const { detail, components } = renderDetail(interaction, {
                 post,
