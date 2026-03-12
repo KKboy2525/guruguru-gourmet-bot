@@ -221,7 +221,7 @@ async function deleteImageFileFromStorage(storagePath)
 {
     if (!storagePath) return;
 
-    const normalized = String(storagePath).replace(/ ^\/ +/, '');
+    const normalized = String(storagePath).replace(/^\/+/, '')
 
     const { error } = await supabase.storage
         .from('post-images')
@@ -429,7 +429,7 @@ async function createPostInDb(guild, discordUserId, d)
 
     await replacePostTagsDb(data.id, d.tags ?? []);
 
-    return data.id;
+    return data;
 }
 
 async function replacePostTagsDb(postId, tags = [])
@@ -462,36 +462,6 @@ async function replacePostTagsDb(postId, tags = [])
     if (insErr) throw insErr;
 }
 
-async function uploadImageToSupabaseStorage({
-    guildId,
-    postId,
-    sourceBuffer,
-    filename,
-    contentType,
-}) {
-    const safeName = (filename || 'image').replace(/[^\w.-]/g, '_');
-
-    const path = `${guildId}/${postId}/${Date.now()}-${safeName}`;
-
-    const { error: uploadError } = await supabase.storage
-    .from('post-images')
-    .upload(path, sourceBuffer, {
-        contentType: contentType || 'application/octet-stream',
-            upsert: false,
-        });
-
-    if (uploadError) throw uploadError;
-
-    const { data } = supabase.storage
-        .from('post-images')
-        .getPublicUrl(path);
-
-    return {
-        path,
-        publicUrl: data.publicUrl,
-    };
-}
-
 async function addPostImagesDb(guildId, postId, files = [])
 {
     const rows = [];
@@ -503,36 +473,74 @@ async function addPostImagesDb(guildId, postId, files = [])
         .order('sort_order', { ascending: false })
         .limit(1);
 
-if (existingErr) throw existingErr;
+    if (existingErr) throw existingErr;
 
-let nextSort = (existing?.[0]?.sort_order ?? -1) + 1;
+    let nextSort = (existing?.[0]?.sort_order ?? -1) + 1;
 
-for (const file of files) {
-    const buffer = await fetchImageAsBuffer(file.url);
+    for (const file of files) {
+        const buffer = await fetchImageAsBuffer(file.url);
 
-    const uploaded = await uploadImageToSupabaseStorage({
-        guildId,
-    postId,
-    sourceBuffer: buffer,
-    filename: file.name || 'image',
-    contentType: file.contentType || 'application/octet-stream',
-});
+        const uploaded = await uploadPostImageToStorage({
+            guildId,
+            postId,
+            sourceBuffer: buffer,
+            filename: file.name || 'image',
+            contentType: file.contentType || 'application/octet-stream',
+        });
 
-    rows.push({
-    post_id: postId,
-            image_url: uploaded.publicUrl,
+        rows.push({
+            post_id: postId,
+            image_url: uploaded.url,
             storage_path: uploaded.path,
             sort_order: nextSort++,
         });
+    }
+
+    if (!rows.length) return;
+
+    const { error } = await supabase
+        .from('post_images')
+        .insert(rows);
+
+    if (error) throw error;
 }
 
-if (!rows.length) return;
+async function uploadPostImageToStorage({
+    guildId,
+    postId,
+    sourceBuffer,
+    filename,
+    contentType,
+}) {
 
-const { error } = await supabase
-    .from('post_images')
-    .insert(rows);
+    // ファイル名を安全化
+    const safeName = (filename || 'image')
+        .replace(/[^\w.-]/g, '_')
+        .slice(0, 120);
 
-if (error) throw error;
+    // 保存パス
+    const path = `${guildId}/${postId}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+        .from('post-images')
+        .upload(path, sourceBuffer, {
+            contentType: contentType || 'application/octet-stream',
+            upsert: false,
+        });
+
+    if (uploadError) {
+        throw new Error(`画像アップロード失敗: ${uploadError.message}`);
+    }
+
+    // 公開URL取得
+    const { data } = supabase.storage
+        .from('post-images')
+        .getPublicUrl(path);
+
+    return {
+        path,
+        url: data.publicUrl,
+    };
 }
 
 async function fetchImageAsBuffer(url)
@@ -894,34 +902,32 @@ function visitFilterMatch(state, post)
     return true; // all
 }
 
-function normalizeVisitedDate(raw)
-{
+function normalizeVisitedDate(raw) {
     const s = (raw ?? '').trim();
     if (!s) return '';
 
-    // YYYY-MM-DD → YYYY/MM/DD に寄せる
-    const m = s.match(/ ^(\d{ 4})[-\/](\d
-{ 1,2})[-\/](\d
-{ 1,2})$/);
-if (!m) return null;
+    // YYYY-MM-DD / YYYY/MM/DD を許可
+    const m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+    if (!m) return null;
 
-const y = Number(m[1]);
-const mo = Number(m[2]);
-const d = Number(m[3]);
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
 
-const dt = new Date(y, mo - 1, d);
-if (
-    dt.getFullYear() !== y ||
-    dt.getMonth() !== mo - 1 ||
-    dt.getDate() !== d
-)
-{
-    return null;
-}
+    const dt = new Date(y, mo - 1, d);
 
-const mm = String(mo).padStart(2, '0');
-const dd = String(d).padStart(2, '0');
-return `${ y}/${ mm}/${ dd}`;
+    if (
+        dt.getFullYear() !== y ||
+        dt.getMonth() !== mo - 1 ||
+        dt.getDate() !== d
+    ) {
+        return null;
+    }
+
+    const mm = String(mo).padStart(2, '0');
+    const dd = String(d).padStart(2, '0');
+
+    return `${y}/${mm}/${dd}`;
 }
 
 function todayYMD()
@@ -2820,6 +2826,76 @@ function renderDetail(
     return { detail, components };
 }
 
+async function deletePostImageFromStorage(imageRow) {
+    if (!imageRow) return;
+
+    if (imageRow.storage_path) {
+        const { error: storageError } = await supabase.storage
+            .from('post-images')
+            .remove([imageRow.storage_path]);
+
+        if (storageError) {
+            throw new Error(`Storage削除失敗: ${storageError.message}`);
+        }
+    }
+
+    const { error: dbError } = await supabase
+        .from('post_images')
+        .delete()
+        .eq('id', imageRow.id);
+
+    if (dbError) {
+        throw new Error(`post_images削除失敗: ${dbError.message}`);
+    }
+}
+
+async function deleteAllPostImagesFromStorage(postId) {
+    const { data: images, error: fetchError } = await supabase
+        .from('post_images')
+        .select('id, storage_path')
+        .eq('post_id', postId);
+
+    if (fetchError) {
+        throw new Error(`画像一覧取得失敗: ${fetchError.message}`);
+    }
+
+    const paths = (images ?? [])
+        .map(x => x.storage_path)
+        .filter(Boolean);
+
+    if (paths.length) {
+        const { error: storageError } = await supabase.storage
+            .from('post-images')
+            .remove(paths);
+
+        if (storageError) {
+            throw new Error(`Storage一括削除失敗: ${storageError.message}`);
+        }
+    }
+
+    const { error: dbError } = await supabase
+        .from('post_images')
+        .delete()
+        .eq('post_id', postId);
+
+    if (dbError) {
+        throw new Error(`post_images一括削除失敗: ${dbError.message}`);
+    }
+}
+
+async function deletePostWithStorage(postId) {
+    await deleteAllPostImagesFromStorage(postId);
+
+    const { error: postError } = await supabase
+        .from('posts')
+        .delete()
+        .eq('id', postId);
+
+    if (postError) {
+        throw new Error(`posts削除失敗: ${postError.message}`);
+    }
+}
+
 // ====== interactions ======
 client.on(Events.InteractionCreate, async interaction => {
     try {
@@ -3834,7 +3910,7 @@ client.on(Events.InteractionCreate, async interaction => {
         };
 
         const select = new StringSelectMenuBuilder()
-            .setCustomId(`search:prefPick:${guildId}:${ownerId}:${p}`)
+            .setCustomId(`search:prefPick:${gid}:${ownerId}:${p}`)
             .setPlaceholder(`都道府県を選択してください（複数可） ${p + 1}/${totalPages}`)
             .setMinValues(0)
             .setMaxValues(slice.length)
@@ -3848,34 +3924,34 @@ client.on(Events.InteractionCreate, async interaction => {
 
         const nav = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId(`search:prefPagePrev:${guildId}:${ownerId}:${p}`)
+                .setCustomId(`search:prefPagePrev:${gid}:${ownerId}:${p}`)
                 .setLabel('◀ 前へ')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(p <= 0),
 
             new ButtonBuilder()
-                .setCustomId(`search:prefPageNext:${guildId}:${ownerId}:${p}`)
+                .setCustomId(`search:prefPageNext:${gid}:${ownerId}:${p}`)
                 .setLabel('次へ ▶')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(p >= totalPages - 1),
 
             new ButtonBuilder()
-                .setCustomId(`search:prefPageClear:${guildId}:${ownerId}`)
+                .setCustomId(`search:prefPageClear:${gid}:${ownerId}`)
                 .setLabel('解除')
                 .setStyle(ButtonStyle.Secondary),
 
             new ButtonBuilder()
-                .setCustomId(`search:prefBack:${guildId}:${ownerId}`)
+                .setCustomId(`search:prefBack:${gid}:${ownerId}`)
                 .setLabel('戻る')
                 .setStyle(ButtonStyle.Secondary),
         );
 
         return interaction.update({
             content: '都道府県を選択してください',
+            embeds: [],
             components: [new ActionRowBuilder().addComponents(select), nav],
         });
     }
-
     if (id.startsWith('search:prefPageClear:')) {
         const parts = id.split(':');
         const gid = parts[2];
@@ -4871,6 +4947,7 @@ client.on(Events.InteractionCreate, async interaction => {
             components: searchPanelComponents(guildId, userId, st),
         });
     }
+    
     if (id.startsWith('search:setPref:')) {
         const [, , gid, ownerId] = id.split(':');
         if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
@@ -4889,7 +4966,7 @@ client.on(Events.InteractionCreate, async interaction => {
         };
 
         const select = new StringSelectMenuBuilder()
-            .setCustomId(`search:prefPick:${guildId}:${ownerId}:${p}`)
+            .setCustomId(`search:prefPick:${gid}:${ownerId}:${p}`)
             .setPlaceholder(`都道府県を選択してください（複数可） ${p + 1}/${totalPages}`)
             .setMinValues(0)
             .setMaxValues(slice.length)
@@ -4903,24 +4980,24 @@ client.on(Events.InteractionCreate, async interaction => {
 
         const nav = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId(`search:prefPagePrev:${guildId}:${ownerId}:${p}`)
+                .setCustomId(`search:prefPagePrev:${gid}:${ownerId}:${p}`)
                 .setLabel('◀ 前へ')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(p <= 0),
 
             new ButtonBuilder()
-                .setCustomId(`search:prefPageNext:${guildId}:${ownerId}:${p}`)
+                .setCustomId(`search:prefPageNext:${gid}:${ownerId}:${p}`)
                 .setLabel('次へ ▶')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(p >= totalPages - 1),
 
             new ButtonBuilder()
-                .setCustomId(`search:prefPageClear:${guildId}:${ownerId}`)
+                .setCustomId(`search:prefPageClear:${gid}:${ownerId}`)
                 .setLabel('解除')
                 .setStyle(ButtonStyle.Secondary),
 
             new ButtonBuilder()
-                .setCustomId(`search:prefBack:${guildId}:${ownerId}`)
+                .setCustomId(`search:prefBack:${gid}:${ownerId}`)
                 .setLabel('戻る')
                 .setStyle(ButtonStyle.Secondary),
         );
@@ -6505,7 +6582,30 @@ client.on(Events.MessageCreate, async msg => {
         const imgs = [...(msg.attachments?.values() ?? [])].filter(a => isImageAttachment(a));
         if (!imgs.length) return;
 
-        await addPostImagesDb(msg.guildId, wait.postId, imgs);
+        for (const img of imgs) {
+            const res = await fetch(img.url);
+            const buffer = Buffer.from(await res.arrayBuffer());
+
+            const uploaded = await uploadPostImageToStorage({
+                guildId: msg.guildId,
+                postId: wait.postId,
+                sourceBuffer: buffer,
+                filename: img.name,
+                contentType: img.contentType,
+            });
+
+            const { error: insertError } = await supabase
+                .from('post_images')
+                .insert({
+                    post_id: wait.postId,
+                    image_url: uploaded.url,
+                    storage_path: uploaded.path,
+                });
+
+            if (insertError) {
+                throw new Error(`post_images追加失敗: ${insertError.message}`);
+            }
+        }
 
         cacheReadyByGuild.set(msg.guildId, false);
         await ensureCacheLoadedForGuild(msg.guild);
