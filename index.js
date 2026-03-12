@@ -1058,7 +1058,7 @@ function buildSearchCardEmbed(post) {
     return e;
 }
 
-async function ensureCacheLoadedForGuild(guild) {
+async function ensureCacheLoadedForGuild(guild, discordUserId = null) {
     const guildId = guild.id;
     if (cacheReadyByGuild.get(guildId)) return;
 
@@ -1075,47 +1075,66 @@ async function ensureCacheLoadedForGuild(guild) {
 
     if (!serverRow) {
         cacheReadyByGuild.set(guildId, true);
+
+        let viewerUserId = null;
+
+        if (discordUserId) {
+            const { data: viewerRow, error: viewerErr } = await supabase
+                .from('users')
+                .select('id')
+                .eq('discord_user_id', discordUserId)
+                .maybeSingle();
+
+            if (viewerErr) throw viewerErr;
+
+            viewerUserId = viewerRow?.id ?? null;
+        }
+
         return;
     }
+
+    const visibilityFilter = viewerUserId
+        ? `visibility.eq.public,and(server_id.eq.${serverRow.id},visibility.eq.server),and(user_id.eq.${viewerUserId},visibility.eq.private)`
+        : `visibility.eq.public,and(server_id.eq.${serverRow.id},visibility.eq.server)`;
 
     const { data, error } = await supabase
         .from('posts')
         .select(`
+        id,
+        server_id,
+        user_id,
+        shop_id,
+        shop_name,
+        shop_prefecture,
+        shop_map_url,
+        shop_website_url,
+        visited,
+        rating,
+        comment,
+        visited_date,
+        visibility,
+        created_at,
+        updated_at,
+        users!posts_user_id_fkey (
             id,
-            server_id,
-            user_id,
-            shop_id,
-            shop_name,
-            shop_prefecture,
-            shop_map_url,
-            shop_website_url,
-            visited,
-            rating,
-            comment,
-            visited_date,
-            visibility,
-            created_at,
-            updated_at,
-            users!posts_user_id_fkey (
+            discord_user_id,
+            name
+        ),
+        post_images (
+            id,
+            image_url,
+            storage_path,
+            sort_order
+        ),
+        post_tags (
+            tag_id,
+            tags (
                 id,
-                discord_user_id,
                 name
-            ),
-            post_images (
-                id,
-                image_url,
-                storage_path,
-                sort_order
-            ),
-            post_tags (
-                tag_id,
-                tags (
-                    id,
-                    name
-                )
             )
-        `)
-        .or(`server_id.eq.${serverRow.id},visibility.eq.public`)
+        )
+    `)
+        .or(visibilityFilter)
         .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -4826,12 +4845,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
+            await interaction.deferUpdate();
+
             await ensureCacheLoadedForGuild(interaction.guild);
             const cache = getGuildCache(guildId);
             const post = cache.get(d.postId);
-            if (!post) return interaction.reply({ ephemeral: true, content: '対象データが見つかりません' });
+            if (!post) return interaction.editReply({ content: '対象データが見つかりません', embeds: [], components: [] });
             if (!canEdit(interaction, post)) {
-                return interaction.reply({ ephemeral: true, content: '操作できるのは登録者または管理者のみです' });
+                return interaction.editReply({ content: '操作できるのは登録者または管理者のみです', embeds: [], components: [] });
             }
 
             await updatePostInDb(interaction.guild, userId, d);
@@ -4839,7 +4860,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const fresh = await refreshPostCacheById(d.postId, guildId);
 
             if (!fresh) {
-                return interaction.reply({ ephemeral: true, content: '更新後データが見つかりません' });
+                return interaction.editReply({ content: '更新後データが見つかりません', embeds: [], components: [] });
             }
 
             draftRating.delete(k);
@@ -4858,21 +4879,16 @@ client.on(Events.InteractionCreate, async interaction => {
                 forceHomeBack,
             });
 
-            await interaction.update({
+            await interaction.editReply({
                 content: '',
                 embeds: [detail],
                 components,
             });
 
-            const okMsg = await interaction.followUp({
+            await interaction.followUp({
                 content: '✅ 更新しました',
                 ephemeral: true,
-                fetchReply: true,
             });
-
-            setTimeout(() => {
-                okMsg.delete().catch(() => { });
-            }, 2000);
 
             return;
         }
@@ -4920,6 +4936,7 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (id === 'home:mine') {
+
             await interaction.deferUpdate();
 
             const currentMine = mineState.get(k);
@@ -5272,6 +5289,8 @@ client.on(Events.InteractionCreate, async interaction => {
             if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
+            await interaction.deferUpdate();
+
             await ensureCacheLoadedForGuild(interaction.guild);
             const cache = getGuildCache(guildId);
 
@@ -5348,7 +5367,7 @@ client.on(Events.InteractionCreate, async interaction => {
             searchState.set(k, st);
 
             if (!st.results.length) {
-                await interaction.update({
+                await interaction.editReply({
                     content: '該当する記録がありません',
                     embeds: [searchPanelEmbed(st)],
                     components: searchPanelComponents(guildId, userId, st),
