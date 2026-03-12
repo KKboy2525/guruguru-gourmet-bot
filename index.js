@@ -469,14 +469,14 @@ async function uploadImageToSupabaseStorage({
     filename,
     contentType,
 }) {
-    const safeName = (filename || 'image').replace(/[^\w.\-] / g, '_');
-    const path = `${ guildId}/${ postId}/${ Date.now()}
-    -${ safeName}`;
+    const safeName = (filename || 'image').replace(/[^\w.-]/g, '_');
+
+    const path = `${guildId}/${postId}/${Date.now()}-${safeName}`;
 
     const { error: uploadError } = await supabase.storage
-        .from('post-images')
-        .upload(path, sourceBuffer, {
-    contentType: contentType || 'application/octet-stream',
+    .from('post-images')
+    .upload(path, sourceBuffer, {
+        contentType: contentType || 'application/octet-stream',
             upsert: false,
         });
 
