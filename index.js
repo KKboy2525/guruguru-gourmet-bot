@@ -214,14 +214,16 @@ const CONFIRM_KIND = {
 };
 
 // ====== util ======
-async function getPostByIdForViewer(postId, guildId, viewerUserId) {
+async function getPostByIdForViewer(postId, guildId, viewerDiscordUserId) {
+    if (!postId) return null;
+
     await refreshPostCacheById(postId, guildId);
 
     const cache = getGuildCache(guildId);
     const cached = cache.get(postId);
     if (cached) return cached;
 
-    const privatePosts = await getPrivatePostsForViewer(guildId, viewerUserId);
+    const privatePosts = await getPrivatePostsForViewer(guildId, viewerDiscordUserId);
     return privatePosts.find(x => x.id === postId) ?? null;
 }
 
@@ -1157,13 +1159,25 @@ async function ensureCacheLoadedForGuild(guild, discordUserId = null) {
     cacheReadyByGuild.set(guildId, true);
 }
 
+async function ensureServerRowByGuildId(guildId) {
+    const { data, error } = await supabase
+        .from('servers')
+        .select('id, discord_server_id')
+        .eq('discord_server_id', guildId)
+        .maybeSingle();
+
+    if (error) throw error;
+    return data;
+}
+
+
 async function getPrivatePostsForViewer(guildId, viewerDiscordUserId) {
     const serverRow = await ensureServerRowByGuildId(guildId);
     if (!serverRow) return [];
 
     const { data: userRow, error: userErr } = await supabase
         .from('users')
-        .select('id')
+        .select('id, discord_user_id')
         .eq('discord_user_id', viewerDiscordUserId)
         .maybeSingle();
 
@@ -1213,6 +1227,7 @@ async function getPrivatePostsForViewer(guildId, viewerDiscordUserId) {
         .order('created_at', { ascending: false });
 
     if (error) throw error;
+
     return (data ?? []).map(mapDbPostToView);
 }
 
@@ -1277,21 +1292,6 @@ async function refreshPostCacheById(postId, guildId) {
 
     cache.set(post.id, post);
     return post;
-}
-
-async function getPostByIdForViewer(postId, guildId, viewerDiscordUserId) {
-    if (!postId) return null;
-
-    await refreshPostCacheById(postId, guildId);
-
-    const cache = getGuildCache(guildId);
-    const cached = cache.get(postId);
-    if (cached) {
-        return cached;
-    }
-
-    const privatePosts = await getPrivatePostsForViewer(guildId, viewerDiscordUserId);
-    return privatePosts.find(x => x.id === postId) ?? null;
 }
 
 async function upsertShopFromDraft(d) {
@@ -2626,17 +2626,6 @@ function searchResultListComponents(guildId, userId, page, hasPrev, hasNext, opt
 }
 
 // ====== Supabase migration ======
-async function ensureServerRowByGuildId(guildId) {
-    const { data, error } = await supabase
-        .from('servers')
-        .select('id, discord_server_id')
-        .eq('discord_server_id', guildId)
-        .maybeSingle();
-
-    if (error) throw error;
-    return data;
-}
-
 async function ensureServerRow(guild) {
     const payload = {
         discord_server_id: guild.id,
