@@ -1279,6 +1279,21 @@ async function refreshPostCacheById(postId, guildId) {
     return post;
 }
 
+async function getPostByIdForViewer(postId, guildId, viewerDiscordUserId) {
+    if (!postId) return null;
+
+    await refreshPostCacheById(postId, guildId);
+
+    const cache = getGuildCache(guildId);
+    const cached = cache.get(postId);
+    if (cached) {
+        return cached;
+    }
+
+    const privatePosts = await getPrivatePostsForViewer(guildId, viewerDiscordUserId);
+    return privatePosts.find(x => x.id === postId) ?? null;
+}
+
 async function upsertShopFromDraft(d) {
     const place = d.place ?? null;
 
@@ -3761,7 +3776,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await ensureCacheLoadedForGuild(interaction.guild);
             const cache = getGuildCache(guildId);
-            const post = await getPostByIdForViewer(postId, guildId, userId);
+            const post = postId
+                ? await getPostByIdForViewer(postId, guildId, userId)
+                : null;
 
             if (kind === 'dp') {
                 const st = deletePhotoConfirmState.get(k);
@@ -3778,7 +3795,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
-                const targetPost = cache.get(st.postId);
+                const targetPost = await getPostByIdForViewer(st.postId, guildId, userId);
                 if (!targetPost) {
                     deletePhotoConfirmState.delete(k);
 
@@ -3854,7 +3871,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
-                const targetPost = cache.get(st.postId);
+                const targetPost = await getPostByIdForViewer(st.postId, guildId, userId);
                 if (!targetPost) {
                     deleteAllPhotosConfirmState.delete(k);
 
@@ -3914,7 +3931,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return;
                 }
 
-                const targetPost = cache.get(st.postId);
+                const targetPost = await getPostByIdForViewer(st.postId, guildId, userId);
                 openDetailAfterCreateState.delete(k);
 
                 if (!targetPost) {
@@ -4841,8 +4858,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
-            const post = cache.get(d.postId);
+            const post = await getPostByIdForViewer(d.postId, guildId, userId);
 
             if (!post) {
                 return interaction.update({
@@ -4883,8 +4899,7 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
-            const post = cache.get(d.postId);
+            const post = await getPostByIdForViewer(d.postId, guildId, userId);
             if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
 
             const urls = imageUrls(post);
@@ -5515,7 +5530,6 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
             const post = await getPostByIdForViewer(postId, guildId, userId);
             if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
 
@@ -5580,8 +5594,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
             cacheReadyByGuild.set(guildId, false);
             await ensureCacheLoadedForGuild(interaction.guild);
-
-            const cache = getGuildCache(guildId);
             const post = await getPostByIdForViewer(postId, guildId, userId);
             if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
 
@@ -5732,7 +5744,6 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
             const post = await getPostByIdForViewer(postId, guildId, userId);
             if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
             if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
@@ -5763,7 +5774,6 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
             const post = await getPostByIdForViewer(postId, guildId, userId);
             if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
             if (!canEdit(interaction, post)) {
@@ -5835,7 +5845,6 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
             const post = await getPostByIdForViewer(postId, guildId, userId);
             if (!post) return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
             if (!canEdit(interaction, post)) return interaction.reply({ ephemeral: true, content: '写真の編集は投稿者のみです' });
@@ -6232,7 +6241,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 await ensureCacheLoadedForGuild(interaction.guild);
-                const cache = getGuildCache(guildId);
                 const post = await getPostByIdForViewer(postId, guildId, userId);
                 if (!post) {
                     return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
@@ -6266,7 +6274,6 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.deferUpdate();
 
             await ensureCacheLoadedForGuild(interaction.guild);
-            const cache = getGuildCache(guildId);
             const post = await getPostByIdForViewer(postId, guildId, userId);
             if (!post) {
                 return interaction.editReply({
