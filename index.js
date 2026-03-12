@@ -5452,17 +5452,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 results: [],
                 page: 0
             };
-
-            const st = searchState.get(k) ?? {
-                userIdFilter: null,
-                prefectureFilters: [],
-                tagFilters: [],
-                keyword: '',
-                ratingFilters: [],
-                results: [],
-                page: 0
-            };
-
+            
             const results = [];
 
             for (const p of merged.values()) {
