@@ -398,38 +398,38 @@ async function createPostInDb(guild, discordUserId, d)
         visibility: 'server',
     };
 
-const { data, error } = await supabase
-    .from('posts')
-    .insert(payload)
-    .select(`
+    const { data, error } = await supabase
+        .from('posts')
+        .insert(payload)
+        .select(`
             id,
-        server_id,
-        user_id,
-        shop_id,
-        shop_name,
-        shop_prefecture,
-        shop_map_url,
-        shop_website_url,
-        visited,
-        rating,
-        comment,
-        visited_date,
-        visibility,
-        created_at,
-        updated_at,
-        users!posts_user_id_fkey(
-            id,
-            discord_user_id,
-            name
-        )
+            server_id,
+            user_id,
+            shop_id,
+            shop_name,
+            shop_prefecture,
+            shop_map_url,
+            shop_website_url,
+            visited,
+            rating,
+            comment,
+            visited_date,
+            visibility,
+            created_at,
+            updated_at,
+            users!posts_user_id_fkey(
+                id,
+                discord_user_id,
+                name
+            )
         `)
-    .single();
+        .single();
 
-if (error) throw error;
+    if (error) throw error;
 
-await replacePostTagsDb(data.id, d.tags ?? []);
+    await replacePostTagsDb(data.id, d.tags ?? []);
 
-return data.id;
+    return data.id;
 }
 
 async function replacePostTagsDb(postId, tags = [])
@@ -4328,20 +4328,28 @@ client.on(Events.InteractionCreate, async interaction => {
 
         await interaction.deferUpdate();
 
-        const postId = await createPostInDb(interaction.guild, userId, d);
+        const createdPost = await createPostInDb(interaction.guild, userId, d);
 
         cacheReadyByGuild.set(guildId, false);
         await ensureCacheLoadedForGuild(interaction.guild);
 
         const cache = getGuildCache(guildId);
-        const post = cache.get(postId);
+        const post = cache.get(createdPost.id);
+
+        if (!post) {
+            return interaction.editReply({
+                content: '作成後の投稿取得に失敗しました',
+                embeds: [],
+                components: [],
+            });
+        }
 
         draftRating.delete(k);
         createPanelPromptRef.delete(k);
 
         await interaction.editReply({
             content: '',
-            embeds: [photoCreateWaitingEmbed(post.name)],
+            embeds: [photoCreateWaitingEmbed(post.name ?? '(名称不明)')],
             components: photoWaitingComponents(guildId, userId),
         });
 
