@@ -218,39 +218,24 @@ async function getPostByIdForViewer(postId, guildId, viewerDiscordUserId) {
     if (!postId) return null;
 
     const fresh = await refreshPostCacheById(postId, guildId);
-    if (fresh) {
-        if (fresh.visibility === 'public') {
-            return fresh;
-        }
-
-        if (fresh.visibility === 'server' && String(fresh.server_id) === String(guildId)) {
-            return fresh;
-        }
-
-        if (fresh.visibility === 'private' && String(fresh.created_by) === String(viewerDiscordUserId)) {
-            return fresh;
-        }
+    if (fresh && await canViewPost(viewerDiscordUserId, guildId, fresh)) {
+        return fresh;
     }
 
     const cache = getGuildCache(guildId);
     const cached = cache.get(postId);
-    if (cached) {
-        if (cached.visibility === 'public') {
-            return cached;
-        }
-
-        if (cached.visibility === 'server' && String(cached.server_id) === String(guildId)) {
-            return cached;
-        }
-
-        if (cached.visibility === 'private' && String(cached.created_by) === String(viewerDiscordUserId)) {
-            return cached;
-        }
+    if (cached && await canViewPost(viewerDiscordUserId, guildId, cached)) {
+        return cached;
     }
 
     const privatePosts = await getPrivatePostsForViewer(guildId, viewerDiscordUserId);
     const mine = privatePosts.find(x => x.id === postId) ?? null;
-    return mine ?? null;
+
+    if (mine && await canViewPost(viewerDiscordUserId, guildId, mine)) {
+        return mine;
+    }
+
+    return null;
 }
 
 function nowIso() {
@@ -885,19 +870,22 @@ function visibilityLabel(v) {
     return '🖥 サーバー公開';
 }
 
-function canViewPost(userId, guildId, post) {
+async function canViewPost(userId, guildId, post) {
     if (!post) return false;
 
     if (post.visibility === 'private') {
         return post.created_by === userId;
     }
 
-    if (post.visibility === 'server') {
-        return String(post.server_id) === String(guildId);
-    }
-
     if (post.visibility === 'public') {
         return true;
+    }
+
+    if (post.visibility === 'server') {
+        const serverRow = await ensureServerRowByGuildId(guildId);
+        if (!serverRow) return false;
+
+        return String(post.server_id) === String(serverRow.id);
     }
 
     return false;
@@ -1261,6 +1249,7 @@ async function refreshPostCacheById(postId, guildId) {
     if (!postId) return null;
 
     const cache = getGuildCache(guildId);
+    const serverRow = await ensureServerRowByGuildId(guildId);
 
     const { data, error } = await supabase
         .from('posts')
@@ -1316,9 +1305,11 @@ async function refreshPostCacheById(postId, guildId) {
         return post;
     }
 
-    if (post.visibility === 'server' && String(post.server_id) !== String(guildId)) {
-        cache.delete(postId);
-        return post;
+    if (post.visibility === 'server') {
+        if (!serverRow || String(post.server_id) !== String(serverRow.id)) {
+            cache.delete(postId);
+            return post;
+        }
     }
 
     cache.set(post.id, post);
@@ -3542,8 +3533,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 // 詳細画面から来た場合は詳細へ戻す
                 if (wait.backTo === 'detail' && wait.postId) {
                     await ensureCacheLoadedForGuild(interaction.guild, userId);
-                    const cache = getGuildCache(guildId);
-                    const post = cache.get(wait.postId);
+                    const post = await getPostByIdForViewer(wait.postId, guildId, userId);
 
                     if (post) {
                         const nav = getDetailNavState(guildId, userId, wait.postId);
@@ -5446,64 +5436,80 @@ client.on(Events.InteractionCreate, async interaction => {
                 page: 0
             };
 
-            const keywords = (st.keyword ?? '')
-                .normalize('NFKC')
-                .toLowerCase()
-                .trim()
-                .split(/[ \u3000]+/)
-                .filter(Boolean);
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0
+            };
 
-            const results = [...merged.values()]
-                .filter(p => {
-                    if (!canViewPost(userId, guildId, p)) return false;
+            const results = [];
 
-                    if (st.userIdFilter?.length) {
-                        if (!st.userIdFilter.includes(p.created_by)) return false;
+            for (const p of merged.values()) {
+                if (!(await canViewPost(userId, guildId, p))) continue;
+
+                if (st.userIdFilter?.length) {
+                    if (!st.userIdFilter.includes(p.created_by)) continue;
+                }
+
+                if (st.prefectureFilters?.length) {
+                    const pp = (p.prefecture ?? '').trim();
+                    if (!st.prefectureFilters.includes(pp)) continue;
+                }
+
+                if (st.tagFilters?.length) {
+                    const tags = (p.tags ?? [])
+                        .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
+                        .filter(Boolean);
+
+                    const selectedTags = (st.tagFilters ?? [])
+                        .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
+                        .filter(Boolean);
+
+                    if (selectedTags.length && !selectedTags.some(tag => tags.includes(tag))) {
+                        continue;
                     }
+                }
 
-                    if (st.prefectureFilters?.length) {
-                        const pp = (p.prefecture ?? '').trim();
-                        if (!st.prefectureFilters.includes(pp)) return false;
-                    }
+                if ((st.keyword ?? '').trim()) {
+                    const keywords = (st.keyword ?? '')
+                        .normalize('NFKC')
+                        .toLowerCase()
+                        .trim()
+                        .split(/[ \u3000]+/)
+                        .filter(Boolean);
 
-                    if (st.tagFilters?.length) {
-                        const tags = (p.tags ?? [])
-                            .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
-                            .filter(Boolean);
+                    const hay = [
+                        p.name ?? '',
+                        p.comment ?? '',
+                        p.prefecture ?? '',
+                        ...(p.tags ?? [])
+                    ]
+                        .join('\n')
+                        .normalize('NFKC')
+                        .toLowerCase();
 
-                        const selectedTags = (st.tagFilters ?? [])
-                            .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
-                            .filter(Boolean);
-
-                        if (selectedTags.length && !selectedTags.some(tag => tags.includes(tag))) {
-                            return false;
+                    let ok = true;
+                    for (const kw of keywords) {
+                        if (!hay.includes(kw)) {
+                            ok = false;
+                            break;
                         }
                     }
+                    if (!ok) continue;
+                }
 
-                    if (keywords.length) {
-                        const hay = [
-                            p.name ?? '',
-                            p.comment ?? '',
-                            p.prefecture ?? '',
-                            ...(p.tags ?? [])
-                        ]
-                            .join('\n')
-                            .normalize('NFKC')
-                            .toLowerCase();
+                if (st.ratingFilters?.length) {
+                    if (!st.ratingFilters.includes(Number(p.rating))) continue;
+                }
 
-                        for (const kw of keywords) {
-                            if (!hay.includes(kw)) return false;
-                        }
-                    }
+                results.push(p);
+            }
 
-                    if (st.ratingFilters?.length) {
-                        if (!st.ratingFilters.includes(Number(p.rating))) return false;
-                    }
-
-                    return true;
-                })
-                .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-
+            results.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
             st.results = results.map(p => p.id);
             st.page = 0;
             searchState.set(k, st);
@@ -6314,7 +6320,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            if (!canViewPost(userId, guildId, post)) {
+            if (!(await canViewPost(userId, guildId, post))) {
                 return interaction.reply({ ephemeral: true, content: 'この投稿は表示できません' });
             }
 
