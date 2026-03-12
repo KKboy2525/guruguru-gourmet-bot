@@ -870,7 +870,7 @@ function visibilityLabel(v) {
     return '🖥 サーバー公開';
 }
 
-async function canViewPost(userId, guildId, post) {
+function canViewPost(userId, guildServerRowId, post) {
     if (!post) return false;
 
     if (post.visibility === 'private') {
@@ -882,10 +882,7 @@ async function canViewPost(userId, guildId, post) {
     }
 
     if (post.visibility === 'server') {
-        const serverRow = await ensureServerRowByGuildId(guildId);
-        if (!serverRow) return false;
-
-        return String(post.server_id) === String(serverRow.id);
+        return String(post.server_id) === String(guildServerRowId);
     }
 
     return false;
@@ -1093,9 +1090,24 @@ function buildSearchCardEmbed(post) {
     return e;
 }
 
+async function mergeViewerPrivatePostsIntoCache(guildId, discordUserId) {
+    if (!discordUserId) return;
+
+    const privatePosts = await getPrivatePostsForViewer(guildId, discordUserId);
+    const cache = getGuildCache(guildId);
+
+    for (const post of privatePosts) {
+        cache.set(post.id, post);
+    }
+}
+
 async function ensureCacheLoadedForGuild(guild, discordUserId = null) {
     const guildId = guild.id;
-    if (cacheReadyByGuild.get(guildId)) return;
+
+    if (cacheReadyByGuild.get(guildId)) {
+        await mergeViewerPrivatePostsIntoCache(guildId, discordUserId);
+        return;
+    }
 
     const { data: serverRow, error: serverErr } = await supabase
         .from('servers')
@@ -1163,14 +1175,10 @@ async function ensureCacheLoadedForGuild(guild, discordUserId = null) {
         cache.set(post.id, post);
     }
 
-    if (discordUserId) {
-        const privatePosts = await getPrivatePostsForViewer(guildId, discordUserId);
-        for (const post of privatePosts) {
-            cache.set(post.id, post);
-        }
-    }
+    await mergeViewerPrivatePostsIntoCache(guildId, discordUserId);
 
     cacheReadyByGuild.set(guildId, true);
+}
 }
 
 async function ensureServerRowByGuildId(guildId) {
@@ -2780,11 +2788,14 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         return;
     }
 
-    const filteredIds = st.results.filter(pid => {
-        const p = cache.get(pid);
-        if (!p) return false;
-        return visitFilterMatch(st, p);
-    });
+    const filteredIds = [];
+
+    for (const pid of st.results) {
+        const p = await getPostByIdForViewer(pid, guildId, userId);
+        if (!p) continue;
+        if (!visitFilterMatch(st, p)) continue;
+        filteredIds.push(pid);
+    }
 
     const pageSize = 9;
     let page = Math.max(0, Number(st.page) || 0);
@@ -2794,10 +2805,13 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     mineState.set(k, st);
 
     const start = page * pageSize;
-    const slice = filteredIds
-        .slice(start, start + pageSize)
-        .map(pid => cache.get(pid))
-        .filter(Boolean);
+    const sliceIds = filteredIds.slice(start, start + pageSize);
+    const slice = [];
+
+    for (const pid of sliceIds) {
+        const p = await getPostByIdForViewer(pid, guildId, userId);
+        if (p) slice.push(p);
+    }
 
     const listHeader = new EmbedBuilder()
         .setTitle('📚 自分の記録')
@@ -2869,10 +2883,13 @@ async function renderSearchResultList(interaction, guildId, userId, { update = f
     searchState.set(k, st);
 
     const start = page * pageSize;
-    const slice = st.results
-        .slice(start, start + pageSize)
-        .map(pid => cache.get(pid))
-        .filter(Boolean);
+    const sliceIds = st.results.slice(start, start + pageSize);
+    const slice = [];
+
+    for (const pid of sliceIds) {
+        const p = await getPostByIdForViewer(pid, guildId, userId);
+        if (p) slice.push(p);
+    }
 
     const header = new EmbedBuilder()
         .setTitle('🔎 検索結果一覧')
@@ -6033,11 +6050,14 @@ client.on(Events.InteractionCreate, async interaction => {
             await ensureCacheLoadedForGuild(interaction.guild, userId);
             const cache = getGuildCache(guildId);
 
-            const filteredIds = st.results.filter(pid => {
-                const p = cache.get(pid);
-                if (!p) return false;
-                return visitFilterMatch(st, p);
-            });
+            const filteredIds = [];
+
+            for (const pid of st.results) {
+                const p = await getPostByIdForViewer(pid, guildId, userId);
+                if (!p) continue;
+                if (!visitFilterMatch(st, p)) continue;
+                filteredIds.push(pid);
+            }
 
             const pageSize = 9;
             const maxPage = Math.max(0, Math.ceil(filteredIds.length / pageSize) - 1);
