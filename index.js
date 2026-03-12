@@ -174,6 +174,9 @@ const photoView = new Map();
 // 写真削除確認の一時状態 key: guildId:userId -> { postId, idx }
 const deletePhotoConfirmState = new Map();
 
+// 全写真削除確認の一時状態 key: guildId:userId -> { postId }
+const deleteAllPhotosConfirmState = new Map();
+
 // 詳細画面の戻り先状態 key: guildId:userId -> { postId, fromMine, forceHomeBack }
 const detailNavState = new Map();
 
@@ -348,6 +351,7 @@ async function updatePostInDb(guild, discordUserId, d) {
         rating: d.visited === false ? null : Number(d.rating),
         comment: d.comment?.trim() || null,
         visited_date: d.visited === false ? null : normalizeDateForDb(d.visitedDate),
+        visibility: d.visibility || 'server',
     };
 
     const { error } = await supabase
@@ -382,7 +386,7 @@ async function createPostInDb(guild, discordUserId, d) {
             ? null
             : normalizeDateForDb(d.visitedDate),
 
-        visibility: 'server',
+        visibility: d.visibility || 'server',
     };
 
     const { data, error } = await supabase
@@ -836,6 +840,22 @@ function hasRating(post) {
     return post?.visited !== false && post?.rating != null;
 }
 
+function visibilityLabel(v) {
+    if (v === 'private') return '🔒 非公開';
+    if (v === 'public') return '🌍 全体公開';
+    return '🖥 サーバー公開';
+}
+
+function canViewPost(userId, post) {
+    if (!post) return false;
+
+    if (post.visibility === 'private') {
+        return post.created_by === userId;
+    }
+
+    return true;
+}
+
 function visitFilterMatch(state, post) {
     const filter = state?.visitFilter ?? 'all';
 
@@ -949,6 +969,7 @@ function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null,
     }
 
     lines.push(`🏷 ${safeText(tagString(post.tags), 500)}`);
+    lines.push(`🌐 ${visibilityLabel(post.visibility)}`);
     lines.push(`👤 登録者 <@${post.created_by}>`);
 
     if (sharedByUserId) {
@@ -1094,7 +1115,7 @@ async function ensureCacheLoadedForGuild(guild) {
                 )
             )
         `)
-        .eq('server_id', serverRow.id)
+        .or(`server_id.eq.${serverRow.id},visibility.eq.public`)
         .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -1134,9 +1155,9 @@ async function upsertShopFromDraft(d) {
 }
 
 function canEdit(interaction, post) {
-    if (!interaction.guild) return false;
-    if (interaction.user.id === post.created_by) return true;
-    return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
+    if (!post) return false;
+
+    return post.created_by === interaction.user.id;
 }
 
 function isMine(interaction, post) {
@@ -1834,6 +1855,22 @@ function deletePhotoConfirmComponents(guildId, userId) {
 
             new ButtonBuilder()
                 .setCustomId(`confirm:no:dp:${guildId}:${userId}`)
+                .setLabel('いいえ')
+                .setStyle(ButtonStyle.Secondary)
+        )
+    ];
+}
+
+function deleteAllPhotosConfirmComponents(guildId, userId) {
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`confirm:yes:da:${guildId}:${userId}`)
+                .setLabel('はい')
+                .setStyle(ButtonStyle.Danger),
+
+            new ButtonBuilder()
+                .setCustomId(`confirm:no:da:${guildId}:${userId}`)
                 .setLabel('いいえ')
                 .setStyle(ButtonStyle.Secondary)
         )
@@ -2677,8 +2714,10 @@ function detailActionComponents(
     guildId,
     userId,
     postId,
-    { fromMine = false, canEditThis = true, total = 1, forceHomeBack = false, hasPhotos = false } = {}
+    { fromMine = false, canEditThis = true, total = 1, forceHomeBack = false, hasPhotos = false, visibility = 'server' } = {}
 ) {
+    const rows = [];
+
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`res:prev:${guildId}:${userId}:${postId}`)
@@ -2698,13 +2737,13 @@ function detailActionComponents(
             .setStyle(ButtonStyle.Primary)
     );
 
+    rows.push(row1);
+
     const backCustomId = forceHomeBack
         ? `mine:home:${guildId}:${userId}`
         : (fromMine ? `mine:back:${guildId}:${userId}` : `search:listBack:${guildId}:${userId}`);
 
-    const backLabel = forceHomeBack
-        ? '🏠 ホーム'
-        : '🔙 戻る';
+    const backLabel = forceHomeBack ? '🏠 ホーム' : '🔙 戻る';
 
     const row2Buttons = [];
 
@@ -2713,11 +2752,6 @@ function detailActionComponents(
             new ButtonBuilder()
                 .setCustomId(`res:edit:${guildId}:${userId}:${postId}`)
                 .setLabel('✏ 編集')
-                .setStyle(ButtonStyle.Secondary),
-
-            new ButtonBuilder()
-                .setCustomId(`res:photos:${guildId}:${userId}:${postId}`)
-                .setLabel('🖼 写真管理')
                 .setStyle(ButtonStyle.Secondary),
 
             new ButtonBuilder()
@@ -2734,9 +2768,36 @@ function detailActionComponents(
             .setStyle(ButtonStyle.Secondary)
     );
 
-    const row2 = new ActionRowBuilder().addComponents(...row2Buttons);
+    rows.push(new ActionRowBuilder().addComponents(...row2Buttons));
 
-    return [row1, row2];
+    if (canEditThis) {
+        rows.push(
+            visibilityComponents(guildId, userId, postId, visibility)
+        );
+    }
+
+    return rows;
+}
+
+function visibilityComponents(guildId, userId, postId, currentVisibility = 'server') {
+    const current = currentVisibility || 'server';
+
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`res:vis:private:${guildId}:${userId}:${postId}`)
+            .setLabel(`${current === 'private' ? '◉' : '○'} 非公開`)
+            .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+            .setCustomId(`res:vis:server:${guildId}:${userId}:${postId}`)
+            .setLabel(`${current === 'server' ? '◉' : '○'} サーバー公開`)
+            .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+            .setCustomId(`res:vis:public:${guildId}:${userId}:${postId}`)
+            .setLabel(`${current === 'public' ? '◉' : '○'} 全体公開`)
+            .setStyle(ButtonStyle.Secondary)
+    );
 }
 
 function cameFromMine(k, postId, mineState) {
@@ -2775,6 +2836,7 @@ function renderDetail(
         total,
         forceHomeBack,
         hasPhotos: urls.length > 1,
+        visibility: post.visibility ?? 'server',
     });
 
     return { detail, components };
@@ -3379,10 +3441,12 @@ client.on(Events.InteractionCreate, async interaction => {
                 const urls = imageUrls(post);
                 if (!urls.length) {
                     if (kind === 'deleteAllPhotos') {
+                        deleteAllPhotosConfirmState.set(k, { postId });
+
                         return interaction.update({
                             content: '',
                             embeds: [confirmDeleteAllPhotosEmbed(post)],
-                            components: confirmComponents('deleteAllPhotos', guildId, userId, postId, '0', false),
+                            components: deleteAllPhotosConfirmComponents(guildId, ownerId),
                         });
                     }
 
@@ -3402,6 +3466,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 if (kind === 'deleteAllPhotos') {
+                    deleteAllPhotosConfirmState.set(k, { postId });
+
                     const embed = new EmbedBuilder()
                         .setTitle('⚠ 写真をすべて削除')
                         .setDescription(`**${post.name}** の写真をすべて削除しますか？\n写真 ${idx + 1}/${urls.length}`)
@@ -3410,7 +3476,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.update({
                         content: '',
                         embeds: [embed],
-                        components: confirmComponents('deleteAllPhotos', guildId, userId, postId, String(idx), urls.length > 1),
+                        components: deleteAllPhotosConfirmComponents(guildId, ownerId),
                     });
                 }
 
@@ -3445,7 +3511,21 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
-                d.tags = interaction.values ?? [];
+                await ensureCacheLoadedForGuild(interaction.guild);
+                const cache = getGuildCache(guildId);
+
+                const existingTags = new Set(
+                    getAllTagsFromCache(cache).map(x => String(x ?? '').trim().toLowerCase())
+                );
+
+                const pickedExistingTags = (interaction.values ?? [])
+                    .map(x => String(x ?? '').trim())
+                    .filter(Boolean);
+
+                const customTags = (d.tags ?? [])
+                    .filter(tag => !existingTags.has(String(tag ?? '').trim().toLowerCase()));
+
+                d.tags = [...customTags, ...pickedExistingTags];
                 draftRating.set(k, d);
 
                 return mode === 'create'
@@ -3600,6 +3680,68 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
+            if (kind === 'da') {
+                const st = deleteAllPhotosConfirmState.get(k);
+
+                if (answer === 'no' || !st?.postId) {
+                    deleteAllPhotosConfirmState.delete(k);
+
+                    await interaction.update({
+                        content: '',
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+                    uiMessages.set(k, new Set([interaction.message.id]));
+                    return;
+                }
+
+                const targetPost = cache.get(st.postId);
+                if (!targetPost) {
+                    deleteAllPhotosConfirmState.delete(k);
+
+                    await interaction.update({
+                        content: '',
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+                    uiMessages.set(k, new Set([interaction.message.id]));
+                    return;
+                }
+
+                if (!canEdit(interaction, targetPost)) {
+                    return interaction.reply({
+                        ephemeral: true,
+                        content: '操作できるのは登録者または管理者のみです'
+                    });
+                }
+
+                await deleteAllPostImagesWithStorage(st.postId);
+
+                cacheReadyByGuild.set(guildId, false);
+                await ensureCacheLoadedForGuild(interaction.guild);
+
+                const fresh = getGuildCache(guildId).get(st.postId);
+                deleteAllPhotosConfirmState.delete(k);
+
+                if (!fresh) {
+                    return interaction.update({
+                        embeds: [homeEmbed()],
+                        components: homeComponents(),
+                    });
+                }
+
+                photoView.set(k, { postId: st.postId, idx: 0 });
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`🖼 写真管理: ${safeText(fresh.name || '(名称不明)', 200)}`)
+                    .setDescription('写真はありません');
+
+                return interaction.update({
+                    embeds: [embed],
+                    components: photoManagerComponents(guildId, ownerId, st.postId, 0),
+                });
+            }
+
             if (kind === 'od') {
                 const st = openDetailAfterCreateState.get(k);
 
@@ -3652,34 +3794,6 @@ client.on(Events.InteractionCreate, async interaction => {
             // ===== NO =====
             if (answer === 'no') {
                 if (kind === 'deletePhoto') {
-                    if (!post) {
-                        return interaction.update({
-                            content: '',
-                            embeds: [homeEmbed()],
-                            components: homeComponents(),
-                        });
-                    }
-
-                    const urls = imageUrls(post);
-                    const idx = Math.max(0, Math.min(urls.length - 1, Number(extra) || 0));
-                    photoView.set(k, { postId, idx });
-
-                    const embed = new EmbedBuilder()
-                        .setTitle(`🖼 写真管理: ${safeText(post.name || '(名称不明)', 200)}`)
-                        .setDescription(urls.length ? `写真 ${idx + 1}/${urls.length}` : '写真はありません');
-
-                    if (urls.length && urls[idx]) {
-                        embed.setImage(urls[idx]);
-                    }
-
-                    return interaction.update({
-                        content: '',
-                        embeds: [embed],
-                        components: photoManagerComponents(guildId, ownerId, postId, urls.length),
-                    });
-                }
-
-                if (kind === 'deleteAllPhotos') {
                     if (!post) {
                         return interaction.update({
                             content: '',
@@ -3798,39 +3912,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            if (kind === 'deleteAllPhotos') {
-                if (!post) {
-                    return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
-                }
-                if (!canEdit(interaction, post)) {
-                    return interaction.reply({ ephemeral: true, content: '操作できるのは登録者または管理者のみです' });
-                }
-
-                await deleteAllPostImagesWithStorage(postId);
-
-                cacheReadyByGuild.set(guildId, false);
-                await ensureCacheLoadedForGuild(interaction.guild);
-
-                const fresh = getGuildCache(guildId).get(postId);
-                if (!fresh) {
-                    return interaction.update({
-                        embeds: [homeEmbed()],
-                        components: homeComponents(),
-                    });
-                }
-
-                photoView.set(k, { postId, idx: 0 });
-
-                const embed = new EmbedBuilder()
-                    .setTitle(`🖼 写真管理: ${safeText(fresh.name || '(名称不明)', 200)}`)
-                    .setDescription('写真はありません');
-
-                return interaction.update({
-                    embeds: [embed],
-                    components: photoManagerComponents(guildId, ownerId, postId, 0),
-                });
-            }
-
             return interaction.update({
                 content: '',
                 embeds: [homeEmbed()],
@@ -3848,7 +3929,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: '途中状態がありません最初からやり直してください' });
             }
 
-            const currentValue = d.visitedDate ?? '';
+            const currentValue = (d.visitedDate ?? '').trim() || todayYMD();
 
             return interaction.showModal(
                 buildVisitedDateModal(gid, ownerId, mode, postId || '', currentValue)
@@ -4276,7 +4357,11 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             const d = draftRating.get(k) ?? {};
-            return interaction.showModal(buildVisitedDateModal(gid, ownerId, 'create', '', d.visitedDate ?? ''));
+            const currentValue = (d.visitedDate ?? '').trim() || todayYMD();
+
+            return interaction.showModal(
+                buildVisitedDateModal(gid, ownerId, 'create', '', currentValue)
+            );
         }
 
         if (id.startsWith('create:setPref:')) {
@@ -4553,7 +4638,11 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             const d = draftRating.get(k) ?? {};
-            return interaction.showModal(buildVisitedDateModal(gid, ownerId, 'edit', '', d.visitedDate ?? ''));
+            const currentValue = (d.visitedDate ?? '').trim() || todayYMD();
+
+            return interaction.showModal(
+                buildVisitedDateModal(gid, ownerId, 'edit', '', currentValue)
+            );
         }
 
         if (id.startsWith('edit:setPref:')) {
@@ -5079,6 +5168,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const results = [...cache.values()]
                 .filter(p => {
+                    if (!canViewPost(userId, p)) return false;
+
                     if (st.userIdFilter?.length) {
                         if (!st.userIdFilter.includes(p.created_by)) return false;
                     }
@@ -5281,6 +5372,79 @@ client.on(Events.InteractionCreate, async interaction => {
             return;
         }
 
+        if (id.startsWith('res:vis:')) {
+            const [, , vis, gid, ownerId, postId] = id.split(':');
+
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            }
+
+            if (!['private', 'server', 'public'].includes(vis)) {
+                return interaction.reply({ ephemeral: true, content: '公開範囲が不正です' });
+            }
+
+            await ensureCacheLoadedForGuild(interaction.guild);
+            const cache = getGuildCache(guildId);
+            const post = cache.get(postId);
+
+            if (!post) {
+                return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+            }
+
+            if (!canEdit(interaction, post)) {
+                return interaction.reply({ ephemeral: true, content: '変更できるのは投稿者または管理者のみです' });
+            }
+
+            const { error } = await supabase
+                .from('posts')
+                .update({ visibility: vis })
+                .eq('id', postId);
+
+            if (error) {
+                throw error;
+            }
+
+            const d = draftRating.get(k);
+            if (d && d.mode === 'edit' && d.postId === postId) {
+                d.visibility = vis;
+                draftRating.set(k, d);
+            }
+
+            cacheReadyByGuild.set(guildId, false);
+            await ensureCacheLoadedForGuild(interaction.guild);
+
+            const fresh = getGuildCache(guildId).get(postId);
+            if (!fresh) {
+                return interaction.update({
+                    content: '',
+                    embeds: [homeEmbed()],
+                    components: homeComponents(),
+                });
+            }
+
+            const nav = getDetailNavState(guildId, userId, postId);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
+
+            const { detail, components } = renderDetail(interaction, {
+                post: fresh,
+                guildId,
+                userId,
+                fromMine,
+                total: forceHomeBack ? 1 : (fromMine ? 1 : (searchState.get(k)?.results?.length || 1)),
+                forceHomeBack,
+            });
+
+            return interaction.update({
+                content: '',
+                embeds: [detail],
+                components,
+            });
+        }
+
         // Edit from result (only if canEdit)
         if (id.startsWith('res:edit:')) {
             const [, , gid, ownerId, postId] = id.split(':');
@@ -5311,6 +5475,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 url: post.url ?? '',
                 mapUrl: post.map_url ?? '',
                 name: post.name ?? '',
+                visibility: post.visibility ?? 'server',
                 channelId: interaction.channelId,
             });
 
@@ -5494,17 +5659,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
+                deleteAllPhotosConfirmState.set(k, { postId });
+
                 return interaction.update({
                     content: '',
                     embeds: [confirmDeleteAllPhotosEmbed(post)],
-                    components: confirmComponents(
-                        'deleteAllPhotos',
-                        guildId,
-                        ownerId,
-                        postId,
-                        '0',
-                        imgs.length > 1
-                    ),
+                    components: deleteAllPhotosConfirmComponents(guildId, ownerId),
                 });
             }
 
@@ -5873,6 +6033,10 @@ client.on(Events.InteractionCreate, async interaction => {
                     embeds: [],
                     components: homeComponents(),
                 });
+            }
+
+            if (!canViewPost(userId, post)) {
+                return interaction.reply({ ephemeral: true, content: 'この投稿は表示できません' });
             }
 
             const { detail, components } = renderDetail(interaction, {
@@ -6573,9 +6737,17 @@ client.on(Events.MessageCreate, async msg => {
         const imgs = [...(msg.attachments?.values() ?? [])].filter(a => isImageAttachment(a));
         if (!imgs.length) return;
 
-        uploadingMsg = await msg.reply({
-            content: '📷 写真を登録しています…少しお待ちください'
-        }).catch(() => null);
+        if (wait.uiMessageRef) {
+            await editPromptRef(wait.uiMessageRef, {
+                content: '',
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('📷 写真を登録しています')
+                        .setDescription('少し待ってください...')
+                ],
+                components: [],
+            });
+        }
 
         for (const img of imgs) {
             const res = await fetch(img.url);
