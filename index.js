@@ -3004,7 +3004,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     const filteredIds = [];
 
     for (const pid of st.results) {
-        const p = await getPostByIdForViewer(pid, guildId, userId);
+        const p = cache.get(pid) ?? await getPostByIdForViewer(pid, guildId, userId);
         if (!p) continue;
         if (!visitFilterMatch(st, p)) continue;
         filteredIds.push(pid);
@@ -3045,7 +3045,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     const slice = [];
 
     for (const pid of sliceIds) {
-        const p = await getPostByIdForViewer(pid, guildId, userId);
+        const p = cache.get(pid) ?? await getPostByIdForViewer(pid, guildId, userId);
         if (p) slice.push(p);
     }
 
