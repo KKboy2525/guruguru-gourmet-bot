@@ -3010,7 +3010,30 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         filteredIds.push(pid);
     }
 
+    if (!filteredIds.length) {
+        const e = new EmbedBuilder()
+            .setTitle('📚 自分の記録')
+            .setDescription('(まだありません)');
+
+        const payload = {
+            embeds: [e],
+            components: homeComponents(),
+        };
+
+        if (update) {
+            return updateLike(interaction, payload);
+        }
+
+        await interaction.reply({
+            ephemeral: true,
+            ...payload,
+        });
+        await rememberUiReply(interaction, guildId, userId);
+        return;
+    }
+
     const pageSize = 9;
+
     let page = Math.max(0, Number(st.page) || 0);
     const maxPage = Math.max(0, Math.ceil(filteredIds.length / pageSize) - 1);
     if (page > maxPage) page = maxPage;
