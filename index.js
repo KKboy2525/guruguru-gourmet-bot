@@ -2973,9 +2973,6 @@ async function updateLike(interaction, payload) {
 }
 
 async function renderMineList(interaction, guildId, userId, { update = false } = {}) {
-    await ensureCacheLoadedForGuild(interaction.guild, userId);
-    const cache = getGuildCache(guildId);
-
     const k = keyOf(guildId, userId);
     const st = mineState.get(k);
 
@@ -3001,10 +2998,13 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         return;
     }
 
+    const ownPosts = Array.isArray(st.posts) ? st.posts : [];
+    const postMap = new Map(ownPosts.map(p => [p.id, p]));
+
     const filteredIds = [];
 
     for (const pid of st.results) {
-        const p = cache.get(pid) ?? await getPostByIdForViewer(pid, guildId, userId);
+        const p = postMap.get(pid);
         if (!p) continue;
         if (!visitFilterMatch(st, p)) continue;
         filteredIds.push(pid);
@@ -3045,7 +3045,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     const slice = [];
 
     for (const pid of sliceIds) {
-        const p = cache.get(pid) ?? await getPostByIdForViewer(pid, guildId, userId);
+        const p = postMap.get(pid);
         if (p) slice.push(p);
     }
 
@@ -4327,6 +4327,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const mine = mineState.get(k);
                 if (mine?.results) {
                     mine.results = mine.results.filter(x => x !== postId);
+                    mine.posts = (mine.posts ?? []).filter(x => x.id !== postId);
                     mineState.set(k, mine);
                 }
 
@@ -4913,6 +4914,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const mine = mineState.get(k);
             if (mine?.results) {
                 mine.results = [post.id, ...mine.results.filter(x => x !== post.id)];
+                mine.posts = [post, ...(mine.posts ?? []).filter(x => x.id !== post.id)];
                 mineState.set(k, mine);
             }
 
@@ -5410,6 +5412,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 mineState.set(k, {
                     results: minePosts.map(p => p.id),
+                    posts: minePosts,
                     page: 0,
                     visitFilter: currentMine?.visitFilter ?? 'all',
                 });
@@ -6335,10 +6338,12 @@ client.on(Events.InteractionCreate, async interaction => {
             await ensureCacheLoadedForGuild(interaction.guild, userId);
             const cache = getGuildCache(guildId);
 
+            const ownPosts = Array.isArray(st.posts) ? st.posts : [];
+            const postMap = new Map(ownPosts.map(p => [p.id, p]));
             const filteredIds = [];
 
             for (const pid of st.results) {
-                const p = await getPostByIdForViewer(pid, guildId, userId);
+                const p = postMap.get(pid);
                 if (!p) continue;
                 if (!visitFilterMatch(st, p)) continue;
                 filteredIds.push(pid);
@@ -7420,7 +7425,7 @@ client.on(Events.MessageCreate, async msg => {
 
                 const member = msg.member ?? await msg.guild.members.fetch(msg.author.id).catch(() => null);
 
-                const { detail, components } = renderDetail(
+                const { detail, components } = await renderDetail(
                     {
                         guild: msg.guild,
                         user: msg.author,
