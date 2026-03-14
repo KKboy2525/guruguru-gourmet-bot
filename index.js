@@ -6646,15 +6646,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ ephemeral: true, content: '選択が不正です' });
             }
 
-            await interaction.deferUpdate();
-
             const st = mineState.get(k);
             const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
             const postMap = new Map(ownPosts.map(p => [p.id, p]));
             const post = postMap.get(postId);
 
             if (!post) {
-                return interaction.editReply({
+                return interaction.update({
                     content: 'データが見つかりません',
                     embeds: [],
                     components: homeComponents(),
@@ -6670,7 +6668,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 forceHomeBack: false,
             });
 
-            await interaction.editReply({
+            await interaction.update({
                 content: '',
                 embeds: [detail],
                 components,
