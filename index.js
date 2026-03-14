@@ -5964,6 +5964,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
+            await interaction.deferUpdate();
+
             await ensureCacheLoadedForGuild(interaction.guild, userId);
             const cache = getGuildCache(guildId);
 
@@ -5972,11 +5974,11 @@ client.on(Events.InteractionCreate, async interaction => {
             const post = minePostMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
 
             if (!post) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
+                return interaction.followUp({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
             }
 
             if (!canEdit(interaction, post)) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '変更できるのは投稿者のみです' });
+                return interaction.followUp({ flags: MessageFlags.Ephemeral, content: '変更できるのは投稿者のみです' });
             }
 
             const updatedAt = nowIso();
@@ -6006,7 +6008,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const fresh = await refreshPostCacheById(postId, guildId);
 
             if (!fresh) {
-                return interaction.update({
+                return interaction.editReply({
                     content: '',
                     embeds: [homeEmbed()],
                     components: homeComponents(),
@@ -6029,7 +6031,7 @@ client.on(Events.InteractionCreate, async interaction => {
             })) {
                 cache.delete(postId);
 
-                return interaction.update({
+                return interaction.editReply({
                     content: '',
                     embeds: [homeEmbed()],
                     components: homeComponents(),
@@ -6051,7 +6053,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 forceHomeBack,
             });
 
-            return interaction.update({
+            return interaction.editReply({
                 content: '',
                 embeds: [detail],
                 components,
