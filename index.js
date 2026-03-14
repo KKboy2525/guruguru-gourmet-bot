@@ -5281,6 +5281,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
         // home:mine
         if (id === 'home:mine') {
+            await interaction.deferUpdate();
+
             const currentMine = mineState.get(k);
             const needReload = !Array.isArray(currentMine?.results);
 
@@ -5301,7 +5303,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         visitFilter: currentMine?.visitFilter ?? 'all',
                     });
 
-                    await interaction.update({
+                    await interaction.editReply({
                         content: '',
                         embeds: [
                             new EmbedBuilder()
