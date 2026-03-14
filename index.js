@@ -3097,7 +3097,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     const k = keyOf(guildId, userId);
     const st = mineState.get(k);
 
-    if (!st?.results?.length) {
+    if (!st?.results?.length || !Array.isArray(st?.posts)) {
         const e = new EmbedBuilder()
             .setTitle('📚 自分の記録')
             .setDescription('(まだありません)');
@@ -3449,21 +3449,37 @@ client.on(Events.InteractionCreate, async interaction => {
 
         // Slash command
         if (interaction.isChatInputCommand()) {
+            console.log('slash received', {
+                commandName: interaction.commandName,
+                id: interaction.id,
+                userId: interaction.user.id,
+                guildId: interaction.guildId,
+                deferred: interaction.deferred,
+                replied: interaction.replied,
+            });
+
             if (interaction.commandName === 'gourmet') {
                 if (interaction.deferred || interaction.replied) return;
 
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                console.log('before deferReply', {
+                    commandName: interaction.commandName,
+                    id: interaction.id,
+                });
 
                 try {
-                    await ensureViewerCachesLoaded(interaction.guild, interaction.user.id);
-
-                    await interaction.editReply({
+                    await interaction.reply({
+                        flags: MessageFlags.Ephemeral,
                         content: '',
                         embeds: [homeEmbed()],
                         components: homeComponents(),
                     });
 
                     await rememberUiReply(interaction, interaction.guildId, interaction.user.id);
+
+                    ensureViewerCachesLoaded(interaction.guild, interaction.user.id).catch(e => {
+                        console.error('ensureViewerCachesLoaded failed after initial reply', e);
+                    });
+
                     return;
                 } catch (e) {
                     console.error('gourmet command failed after defer', e);
@@ -5287,7 +5303,10 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.deferUpdate();
 
             const currentMine = mineState.get(k);
-            const needReload = !Array.isArray(currentMine?.results);
+            const needReload =
+                !Array.isArray(currentMine?.results) ||
+                !Array.isArray(currentMine?.posts) ||
+                currentMine.results.length !== currentMine.posts.length;
 
             if (needReload) {
                 const { data: userRow, error: userErr } = await supabase
