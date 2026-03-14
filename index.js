@@ -5454,9 +5454,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const minePosts = (data ?? []).map(mapDbPostToView);
 
-                const cache = getGuildCache(guildId);
                 for (const post of minePosts) {
-                    cache.set(post.id, post);
+                    upsertCachedPostForViewer(guildId, userId, post);
                 }
 
                 mineState.set(k, {
