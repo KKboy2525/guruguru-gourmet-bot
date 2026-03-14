@@ -3094,14 +3094,16 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         return;
     }
 
-    await ensureViewerCachesLoaded(interaction.guild, userId);
-    const ownPosts = await resolvePostsForIds(guildId, userId, st.results);
+    const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
+    const postMap = new Map(ownPosts.map(p => [p.id, p]));
 
-    // 自分の記録一覧で実際に表示できた投稿を保持
-    st.posts = ownPosts;
-    mineState.set(k, st);
-
-    const filtered = ownPosts.filter(p => visitFilterMatch(st, p));
+    const filtered = [];
+    for (const pid of st.results) {
+        const p = postMap.get(pid);
+        if (!p) continue;
+        if (!visitFilterMatch(st, p)) continue;
+        filtered.push(p);
+    }
 
     if (!filtered.length) {
         const e = new EmbedBuilder()
@@ -6591,25 +6593,22 @@ client.on(Events.InteractionCreate, async interaction => {
             if (!id.startsWith('mine:pick:')) return;
 
             const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+            }
 
             const postId = interaction.values?.[0];
             if (!postId || postId === 'none') {
-                return interaction.reply({ ephemeral: true, content: '選択が不正です' });
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '選択が不正です' });
             }
-
-            await ensureViewerCachesLoaded(interaction.guild, userId);
 
             const st = mineState.get(k);
             const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
             const postMap = new Map(ownPosts.map(p => [p.id, p]));
-
-            let post = postMap.get(postId);
-
-            if (!post) {
-                post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
-            }
+            const post = postMap.get(postId);
 
             if (!post) {
                 return interaction.update({
