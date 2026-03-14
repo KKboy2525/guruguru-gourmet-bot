@@ -6648,8 +6648,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
-                await interaction.deferUpdate();
-
                 const st = mineState.get(k);
                 const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
 
@@ -6660,7 +6658,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
 
                 if (!post) {
-                    return interaction.editReply({
+                    return interaction.update({
                         content: 'データが見つかりません',
                         embeds: [],
                         components: homeComponents(),
@@ -6679,20 +6677,11 @@ client.on(Events.InteractionCreate, async interaction => {
                     forceHomeBack,
                 });
 
-                await interaction.editReply({
+                return interaction.update({
                     content: '',
                     embeds: [detail],
                     components,
                 });
-
-                await clearOtherUiMessages(
-                    interaction,
-                    guildId,
-                    userId,
-                    interaction.message.id
-                );
-
-                return;
             }
 
             // Modal submit
