@@ -5327,8 +5327,12 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.deferUpdate();
 
             const currentMine = mineState.get(k);
+            const needReload =
+                !currentMine?.results?.length ||
+                !Array.isArray(currentMine?.posts) ||
+                currentMine.posts.length === 0;
 
-            if (!currentMine?.results?.length) {
+            if (needReload) {
                 const { data: userRow, error: userErr } = await supabase
                     .from('users')
                     .select('id')
@@ -6659,7 +6663,7 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = mineState.get(k);
             const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
             const postMap = new Map(ownPosts.map(p => [p.id, p]));
-            const post = postMap.get(postId);
+            const post = postMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
 
             if (!post) {
                 return interaction.update({
