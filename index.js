@@ -5353,6 +5353,8 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (id === 'home:search') {
+            await interaction.deferUpdate();
+
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
                 prefectureFilters: [],
@@ -5365,7 +5367,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             searchState.set(k, st);
 
-            await interaction.update({
+            await interaction.editReply({
                 content: '',
                 embeds: [searchPanelEmbed(st)],
                 components: searchPanelComponents(guildId, userId, st),
@@ -5376,6 +5378,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
         // home:mine
         if (id === 'home:mine') {
+            await interaction.deferUpdate();
+
             const currentMine = mineState.get(k);
             const needReload = !Array.isArray(currentMine?.results);
 
@@ -5396,7 +5400,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         visitFilter: currentMine?.visitFilter ?? 'all',
                     });
 
-                    await interaction.update({
+                    await interaction.editReply({
                         content: '',
                         embeds: [
                             new EmbedBuilder()
@@ -6424,11 +6428,12 @@ client.on(Events.InteractionCreate, async interaction => {
             if (interaction.guildId !== gid) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
             if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
 
+            await interaction.deferUpdate();
             await renderMineList(interaction, guildId, userId, { update: true });
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
             return;
         }
-
+        
         // User select menu (search filter user)
         if (interaction.isUserSelectMenu()) {
             const id = interaction.customId;
