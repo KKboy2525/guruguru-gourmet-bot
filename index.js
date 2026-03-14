@@ -248,10 +248,16 @@ async function getViewerTagSourceCache(guild, userId) {
 async function syncPostAfterWrite(postId, guildId, userId) {
     const fresh = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: true });
 
-    const mine = mineState.get(keyOf(guildId, userId));
+    const mk = keyOf(guildId, userId);
+    const mine = mineState.get(mk);
+
     if (mine?.results && fresh && fresh.created_by === userId) {
         mine.results = [fresh.id, ...mine.results.filter(x => x !== fresh.id)];
-        mineState.set(keyOf(guildId, userId), mine);
+
+        const currentPosts = Array.isArray(mine.posts) ? mine.posts : [];
+        mine.posts = [fresh, ...currentPosts.filter(x => x.id !== fresh.id)];
+
+        mineState.set(mk, mine);
     }
 
     return fresh;
@@ -5377,9 +5383,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (!userRow) {
                     mineState.set(k, {
                         results: [],
+                        posts: [],
                         page: 0,
                         visitFilter: currentMine?.visitFilter ?? 'all',
                     });
+
                     await renderMineList(interaction, guildId, userId, { update: true });
                     await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
                     return;
@@ -5387,19 +5395,62 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const { data, error } = await supabase
                     .from('posts')
-                    .select('id')
+                    .select(`
+                id,
+                server_id,
+                user_id,
+                shop_id,
+                shop_name,
+                shop_prefecture,
+                shop_map_url,
+                shop_website_url,
+                visited,
+                rating,
+                comment,
+                visited_date,
+                visibility,
+                created_at,
+                updated_at,
+                users!posts_user_id_fkey (
+                    id,
+                    discord_user_id,
+                    name
+                ),
+                post_images (
+                    id,
+                    image_url,
+                    storage_path,
+                    sort_order
+                ),
+                post_tags (
+                    tag_id,
+                    tags (
+                        id,
+                        name
+                    )
+                ),
+                post_visible_servers (
+                    server_id,
+                    servers (
+                        id,
+                        discord_server_id,
+                        name
+                    )
+                )
+            `)
                     .eq('user_id', userRow.id)
                     .order('created_at', { ascending: false });
 
                 if (error) throw error;
 
+                const minePosts = (data ?? []).map(mapDbPostToView);
+
                 mineState.set(k, {
-                    results: (data ?? []).map(x => x.id),
+                    results: minePosts.map(x => x.id),
+                    posts: minePosts,
                     page: 0,
                     visitFilter: currentMine?.visitFilter ?? 'all',
                 });
-
-                await ensureViewerCachesLoaded(interaction.guild, userId);
             }
 
             await renderMineList(interaction, guildId, userId, { update: true });
@@ -6607,6 +6658,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const st = mineState.get(k);
             const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
+
+            if (!ownPosts.length) {
+                return interaction.update({
+                    content: '自分の記録データが読み込まれていません',
+                    embeds: [],
+                    components: homeComponents(),
+                });
+            }
             const postMap = new Map(ownPosts.map(p => [p.id, p]));
             const post = postMap.get(postId);
 
