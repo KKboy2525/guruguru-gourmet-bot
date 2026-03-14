@@ -5339,9 +5339,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     .eq('discord_user_id', userId)
                     .maybeSingle();
 
-                if (userErr) {
-                    throw userErr;
-                }
+                if (userErr) throw userErr;
 
                 if (!userRow) {
                     mineState.set(k, {
@@ -5404,9 +5402,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     .eq('user_id', userRow.id)
                     .order('created_at', { ascending: false });
 
-                if (error) {
-                    throw error;
-                }
+                if (error) throw error;
 
                 const minePosts = (data ?? []).map(mapDbPostToView);
 
@@ -6654,7 +6650,7 @@ client.on(Events.InteractionCreate, async interaction => {
             if (!id.startsWith('mine:pick:')) return;
 
             const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
             if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             const postId = interaction.values?.[0];
