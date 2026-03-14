@@ -340,6 +340,14 @@ function getAnyCachedPost(guildId, userId, postId) {
 function upsertCachedPostForViewer(guildId, userId, post) {
     if (!post?.id) return;
 
+    // まず古い公開キャッシュを消す
+    getPublicPostCache(guildId).delete(post.id);
+
+    // 投稿者本人用のprivateキャッシュも必要に応じて整理
+    if (userId) {
+        getPrivatePostCache(guildId, userId).delete(post.id);
+    }
+
     if (post.visibility === 'private') {
         if (userId && post.created_by === userId) {
             getPrivatePostCache(guildId, userId).set(post.id, post);
