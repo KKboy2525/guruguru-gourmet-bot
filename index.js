@@ -4011,103 +4011,6 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         }
 
-        // StringSelectMenu
-        if (interaction.isStringSelectMenu()) {
-            if (id.startsWith('create:tagPick:') || id.startsWith('edit:tagPick:')) {
-                const parts = id.split(':');
-                const mode = parts[0];
-                const gid = parts[2];
-                const ownerId = parts[3];
-
-                if (interaction.guildId !== gid) {
-                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
-                }
-                if (userId !== ownerId) {
-                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
-                }
-
-                const d = draftRating.get(k);
-                if (!d || d.mode !== mode) {
-                    return interaction.reply({
-                        flags: MessageFlags.Ephemeral,
-                        content: mode === 'create' ? '新規登録状態がありません' : '編集状態がありません'
-                    });
-                }
-
-                const cache = await getViewerTagSourceCache(interaction.guild, userId);
-
-                const existingTags = new Set(
-                    getAllTagsFromCache(cache).map(x => String(x ?? '').trim().toLowerCase())
-                );
-
-                const pickedExistingTags = (interaction.values ?? [])
-                    .map(x => String(x ?? '').trim())
-                    .filter(Boolean);
-
-                const customTags = (d.tags ?? [])
-                    .filter(tag => !existingTags.has(String(tag ?? '').trim().toLowerCase()));
-
-                d.tags = [...customTags, ...pickedExistingTags];
-                draftRating.set(k, d);
-
-                return mode === 'create'
-                    ? renderCreatePanel(interaction, guildId, userId, { update: true })
-                    : renderEditPanel(interaction, guildId, userId, { update: true });
-            }
-        }
-
-        if (id.startsWith('search:tagPick:')) {
-            const parts = id.split(':');
-            const gid = parts[2];
-            const ownerId = parts[3];
-            const page = Number(parts[4] || 0);
-
-            if (interaction.guildId !== gid) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
-            }
-            if (userId !== ownerId) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
-            }
-
-            const picked = interaction.values ?? [];
-
-            const st = searchState.get(k) ?? {
-                userIdFilter: null,
-                prefectureFilters: [],
-                tagFilters: [],
-                keyword: '',
-                ratingFilters: [],
-                results: [],
-                page: 0
-            };
-
-            const cache = await getViewerTagSourceCache(interaction.guild, userId);
-
-            const { slice } = tagSlice(cache, page);
-            const current = new Set(st.tagFilters ?? []);
-
-            // 今のページにあるタグはいったん外す
-            for (const tag of slice) {
-                current.delete(tag);
-            }
-
-            // 今回選んだタグを追加
-            for (const tag of picked) {
-                current.add(tag);
-            }
-
-            st.tagFilters = [...current];
-            searchState.set(k, st);
-
-            return interaction.update({
-                content: st.tagFilters.length
-                    ? `タグを設定しました: ${st.tagFilters.map(x => `#${x}`).join(' / ')}`
-                    : 'タグを解除しました',
-                embeds: [searchPanelEmbed(st)],
-                components: searchPanelComponents(guildId, userId, st),
-            });
-        }
-
         if (id.startsWith('confirm:')) {
             const [, answer, kind, gid, ownerId, postId, extra] = id.split(':');
 
@@ -6433,7 +6336,7 @@ client.on(Events.InteractionCreate, async interaction => {
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
             return;
         }
-        
+
         // User select menu (search filter user)
         if (interaction.isUserSelectMenu()) {
             const id = interaction.customId;
@@ -6463,10 +6366,8 @@ client.on(Events.InteractionCreate, async interaction => {
             });
         }
 
-        // String select menu (mine list pick)
         if (interaction.isStringSelectMenu()) {
-            const id = interaction.customId;
-            if (id.startsWith('create:searchPlace:') || id.startsWith('edit:searchPlace:')) {
+            if (id.startsWith('create:tagPick:') || id.startsWith('edit:tagPick:')) {
                 const parts = id.split(':');
                 const mode = parts[0];
                 const gid = parts[2];
@@ -6487,18 +6388,74 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
-                placeSearchState.set(k, {
-                    mode,
-                    query: d.name ?? '',
-                    results: [],
-                    page: 0,
-                    nextPageToken: '',
-                    loadingMore: false,
-                });
+                const cache = await getViewerTagSourceCache(interaction.guild, userId);
 
-                return interaction.showModal(
-                    buildPlaceSearchModal(gid, ownerId, mode, d.name ?? '')
+                const existingTags = new Set(
+                    getAllTagsFromCache(cache).map(x => String(x ?? '').trim().toLowerCase())
                 );
+
+                const pickedExistingTags = (interaction.values ?? [])
+                    .map(x => String(x ?? '').trim())
+                    .filter(Boolean);
+
+                const customTags = (d.tags ?? [])
+                    .filter(tag => !existingTags.has(String(tag ?? '').trim().toLowerCase()));
+
+                d.tags = [...customTags, ...pickedExistingTags];
+                draftRating.set(k, d);
+
+                return mode === 'create'
+                    ? renderCreatePanel(interaction, guildId, userId, { update: true })
+                    : renderEditPanel(interaction, guildId, userId, { update: true });
+            }
+
+            if (id.startsWith('search:tagPick:')) {
+                const parts = id.split(':');
+                const gid = parts[2];
+                const ownerId = parts[3];
+                const page = Number(parts[4] || 0);
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+                }
+
+                const picked = interaction.values ?? [];
+
+                const st = searchState.get(k) ?? {
+                    userIdFilter: null,
+                    prefectureFilters: [],
+                    tagFilters: [],
+                    keyword: '',
+                    ratingFilters: [],
+                    results: [],
+                    page: 0
+                };
+
+                const cache = await getViewerTagSourceCache(interaction.guild, userId);
+                const { slice } = tagSlice(cache, page);
+                const current = new Set(st.tagFilters ?? []);
+
+                for (const tag of slice) {
+                    current.delete(tag);
+                }
+
+                for (const tag of picked) {
+                    current.add(tag);
+                }
+
+                st.tagFilters = [...current];
+                searchState.set(k, st);
+
+                return interaction.update({
+                    content: st.tagFilters.length
+                        ? `タグを設定しました: ${st.tagFilters.map(x => `#${x}`).join(' / ')}`
+                        : 'タグを解除しました',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
             }
 
             if (id.startsWith('place:pick:')) {
@@ -6547,23 +6504,25 @@ client.on(Events.InteractionCreate, async interaction => {
                 draftRating.set(k, d);
                 placeSearchState.delete(k);
 
-                if (st.mode === 'create') {
-                    return renderCreatePanel(interaction, guildId, userId, { update: true });
-                }
-
-                return renderEditPanel(interaction, guildId, userId, { update: true });
+                return st.mode === 'create'
+                    ? renderCreatePanel(interaction, guildId, userId, { update: true })
+                    : renderEditPanel(interaction, guildId, userId, { update: true });
             }
 
-            // ===== 検索：都道府県ピック =====
             if (id.startsWith('search:prefPick:')) {
                 const parts = id.split(':');
                 const gid = parts[2];
                 const ownerId = parts[3];
-                if (interaction.guildId !== gid) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
-                if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+                const page = Number(parts[4] || 0);
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+                }
 
                 const picked = interaction.values ?? [];
-                const page = Number(parts[4] || 0);
 
                 const st = searchState.get(k) ?? {
                     userIdFilter: null,
@@ -6578,12 +6537,10 @@ client.on(Events.InteractionCreate, async interaction => {
                 const { slice } = prefSlice(page);
                 const current = new Set(st.prefectureFilters ?? []);
 
-                // 今のページにある都道府県は一旦外す
                 for (const pref of slice) {
                     current.delete(pref);
                 }
 
-                // 今回選んだものを追加
                 for (const pref of picked) {
                     current.add(pref);
                 }
@@ -6623,17 +6580,20 @@ client.on(Events.InteractionCreate, async interaction => {
                 d.prefecture = picked;
                 draftRating.set(k, d);
 
-                if (mode === 'create') {
-                    return renderCreatePanel(interaction, guildId, userId, { update: true });
-                }
-
-                return renderEditPanel(interaction, guildId, userId, { update: true });
+                return mode === 'create'
+                    ? renderCreatePanel(interaction, guildId, userId, { update: true })
+                    : renderEditPanel(interaction, guildId, userId, { update: true });
             }
 
             if (id.startsWith('search:pick:')) {
                 const [, , gid, ownerId] = id.split(':');
-                if (interaction.guildId !== gid) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
-                if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+
+                if (interaction.guildId !== gid) {
+                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+                }
+                if (userId !== ownerId) {
+                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+                }
 
                 const postId = interaction.values?.[0];
                 if (!postId || postId === 'none') {
@@ -6704,16 +6664,18 @@ client.on(Events.InteractionCreate, async interaction => {
                     forceHomeBack,
                 });
 
-                await interaction.update({
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+
+                return interaction.update({
                     content: '',
                     embeds: [detail],
                     components,
                 });
-
-                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-                return;
             }
+
+            return;
         }
+
         // Modal submit
         if (interaction.isModalSubmit()) {
             const id = interaction.customId;
