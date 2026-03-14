@@ -5281,8 +5281,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
         // home:mine
         if (id === 'home:mine') {
-            await interaction.deferUpdate();
-
             const currentMine = mineState.get(k);
             const needReload = !Array.isArray(currentMine?.results);
 
@@ -5303,7 +5301,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         visitFilter: currentMine?.visitFilter ?? 'all',
                     });
 
-                    await interaction.editReply({
+                    await interaction.update({
                         content: '',
                         embeds: [
                             new EmbedBuilder()
@@ -6627,19 +6625,35 @@ client.on(Events.InteractionCreate, async interaction => {
                 const [, , gid, ownerId] = id.split(':');
 
                 if (interaction.guildId !== gid) {
-                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+                    return interaction.reply({
+                        flags: MessageFlags.Ephemeral,
+                        content: 'ギルド不一致です'
+                    });
                 }
+
                 if (userId !== ownerId) {
-                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+                    return interaction.reply({
+                        flags: MessageFlags.Ephemeral,
+                        content: 'これはあなたの操作ではありません'
+                    });
                 }
 
                 const postId = interaction.values?.[0];
                 if (!postId || postId === 'none') {
-                    return interaction.reply({ flags: MessageFlags.Ephemeral, content: '選択が不正です' });
+                    return interaction.reply({
+                        flags: MessageFlags.Ephemeral,
+                        content: '選択が不正です'
+                    });
                 }
 
                 await ensureViewerCachesLoaded(interaction.guild, userId);
-                const post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: true });
+
+                const post = await getPostByIdForViewer(
+                    postId,
+                    guildId,
+                    userId,
+                    { forceRefresh: true }
+                );
 
                 if (!post) {
                     return interaction.update({
@@ -6662,7 +6676,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     forceHomeBack,
                 });
 
-                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                await clearOtherUiMessages(
+                    interaction,
+                    guildId,
+                    userId,
+                    interaction.message.id
+                );
 
                 return interaction.update({
                     content: '',
@@ -6670,7 +6689,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     components,
                 });
             }
-
             return;
         }
 
