@@ -3447,18 +3447,9 @@ client.on(Events.InteractionCreate, async interaction => {
         // Slash command
         if (interaction.isChatInputCommand()) {
             if (interaction.commandName === 'gourmet') {
-                try {
-                    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-                } catch (e) {
-                    console.error('deferReply failed', {
-                        message: e?.message,
-                        code: e?.code,
-                        guildId: interaction.guildId,
-                        userId: interaction.user?.id,
-                        commandName: interaction.commandName,
-                    });
-                    return;
-                }
+                if (interaction.deferred || interaction.replied) return;
+
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
                 try {
                     await ensureViewerCachesLoaded(interaction.guild, interaction.user.id);
@@ -3474,13 +3465,12 @@ client.on(Events.InteractionCreate, async interaction => {
                 } catch (e) {
                     console.error('gourmet command failed after defer', e);
 
-                    try {
-                        await interaction.editReply({
-                            content: `エラー: ${e.message}`,
-                            embeds: [],
-                            components: [],
-                        });
-                    } catch { }
+                    await interaction.editReply({
+                        content: `エラー: ${e.message}`,
+                        embeds: [],
+                        components: [],
+                    }).catch(() => { });
+
                     return;
                 }
             }
