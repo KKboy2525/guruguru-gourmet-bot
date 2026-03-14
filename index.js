@@ -6050,6 +6050,16 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const fresh = await syncPostAfterWrite(postId, guildId, userId);
 
+            if (fromSearch) {
+                const st = searchState.get(k);
+                if (st?.results?.length) {
+                    if (fresh.visibility === 'private') {
+                        st.results = st.results.filter(x => String(x) !== String(postId));
+                    }
+                    searchState.set(k, st);
+                }
+            }
+
             if (!fresh) {
                 removePostFromUiState(guildId, userId, postId);
 
