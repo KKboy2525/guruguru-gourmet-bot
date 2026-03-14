@@ -6650,21 +6650,21 @@ client.on(Events.InteractionCreate, async interaction => {
             if (!id.startsWith('mine:pick:')) return;
 
             const [, , gid, ownerId] = id.split(':');
-            return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+            if (interaction.guildId !== gid) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
 
             const postId = interaction.values?.[0];
             if (!postId || postId === 'none') {
-                return interaction.reply({ ephemeral: true, content: '選択が不正です' });
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '選択が不正です' });
             }
 
-            const st = mineState.get(k);
-            const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
-            const postMap = new Map(ownPosts.map(p => [p.id, p]));
-            const post = postMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
+            await interaction.deferUpdate();
+
+            await ensureCacheLoadedForGuild(interaction.guild, userId);
+            const post = await getPostByIdForViewer(postId, guildId, userId);
 
             if (!post) {
-                return interaction.update({
+                return interaction.editReply({
                     content: 'データが見つかりません',
                     embeds: [],
                     components: homeComponents(),
@@ -6680,14 +6680,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 forceHomeBack: false,
             });
 
-            await interaction.update({
+            await interaction.editReply({
                 content: '',
                 embeds: [detail],
                 components,
             });
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
             return;
-        }   // ← interaction.isStringSelectMenu() を閉じる
+        }
 
         // Modal submit
         if (interaction.isModalSubmit()) {
