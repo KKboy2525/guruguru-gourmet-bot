@@ -6670,6 +6670,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
+                await interaction.deferUpdate();
+
                 let st = mineState.get(k);
                 let ownPosts = Array.isArray(st?.posts) ? st.posts : [];
                 let post = ownPosts.find(p => String(p.id) === String(postId));
@@ -6760,7 +6762,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 if (!post) {
-                    return interaction.update({
+                    return interaction.editReply({
                         content: 'データが見つかりません',
                         embeds: [],
                         components: homeComponents(),
@@ -6779,7 +6781,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     forceHomeBack,
                 });
 
-                return interaction.update({
+                return interaction.editReply({
                     content: '',
                     embeds: [detail],
                     components,
