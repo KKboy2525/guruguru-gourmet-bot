@@ -5939,34 +5939,37 @@ client.on(Events.InteractionCreate, async interaction => {
             const [, , vis, gid, ownerId, postId] = id.split(':');
 
             if (interaction.guildId !== gid) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
             }
             if (userId !== ownerId) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
             }
 
             if (!['private', 'server', 'public'].includes(vis)) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '公開範囲が不正です' });
+                return interaction.reply({ ephemeral: true, content: '公開範囲が不正です' });
             }
 
             const settings = await getServerSettingsByGuildId(guildId);
             if (vis === 'public' && settings.allow_public_post === false) {
                 return interaction.reply({
-                    flags: MessageFlags.Ephemeral,
+                    ephemeral: true,
                     content: 'このサーバーでは全体公開は許可されていません'
                 });
             }
 
             await ensureCacheLoadedForGuild(interaction.guild, userId);
             const cache = getGuildCache(guildId);
-            const post = await getPostByIdForViewer(postId, guildId, userId);
+
+            const mine = mineState.get(k);
+            const minePostMap = new Map((mine?.posts ?? []).map(p => [p.id, p]));
+            const post = minePostMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
 
             if (!post) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
+                return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
             }
 
             if (!canEdit(interaction, post)) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '変更できるのは投稿者のみです' });
+                return interaction.reply({ ephemeral: true, content: '変更できるのは投稿者のみです' });
             }
 
             const updatedAt = nowIso();
@@ -6001,6 +6004,12 @@ client.on(Events.InteractionCreate, async interaction => {
                     embeds: [homeEmbed()],
                     components: homeComponents(),
                 });
+            }
+
+            if (mine?.posts) {
+                mine.posts = [fresh, ...mine.posts.filter(x => x.id !== postId)];
+                mine.results = [fresh.id, ...mine.results.filter(x => x !== postId)];
+                mineState.set(k, mine);
             }
 
             const serverRow = await ensureServerRowByGuildId(guildId);
@@ -6041,6 +6050,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 components,
             });
         }
+
         // Edit from result (only if canEdit)
         if (id.startsWith('res:edit:')) {
             const [, , gid, ownerId, postId] = id.split(':');
@@ -6048,8 +6058,11 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild, userId);
-            const cache = getGuildCache(guildId);
-            const post = await getPostByIdForViewer(postId, guildId, userId);
+
+            const mine = mineState.get(k);
+            const minePostMap = new Map((mine?.posts ?? []).map(p => [p.id, p]));
+            const post = minePostMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
+
             if (!post) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
             if (!canEdit(interaction, post)) return interaction.reply({ flags: MessageFlags.Ephemeral, content: '編集できません（投稿者のみ）' });
 
@@ -6088,7 +6101,11 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild, userId);
-            const post = await getPostByIdForViewer(postId, guildId, userId);
+
+            const mine = mineState.get(k);
+            const minePostMap = new Map((mine?.posts ?? []).map(p => [p.id, p]));
+            const post = minePostMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
+
             if (!post) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
             if (!canEdit(interaction, post)) return interaction.reply({ flags: MessageFlags.Ephemeral, content: '写真の編集は投稿者のみです' });
 
@@ -6118,14 +6135,17 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild, userId);
-            const post = await getPostByIdForViewer(postId, guildId, userId);
+
+            const mine = mineState.get(k);
+            const minePostMap = new Map((mine?.posts ?? []).map(p => [p.id, p]));
+            const post = minePostMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
+
             if (!post) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
             if (!canEdit(interaction, post)) {
                 return interaction.reply({ flags: MessageFlags.Ephemeral, content: '削除できるのは登録者または管理者のみです' });
             }
 
             const urls = imageUrls(post);
-            const k = keyOf(guildId, userId);
             const pv = detailPhotoView.get(k);
             const idx = pv?.postId === postId
                 ? Math.max(0, Math.min(urls.length - 1, Number(pv.idx) || 0))
@@ -6189,7 +6209,11 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild, userId);
-            const post = await getPostByIdForViewer(postId, guildId, userId);
+
+            const mine = mineState.get(k);
+            const minePostMap = new Map((mine?.posts ?? []).map(p => [p.id, p]));
+            const post = minePostMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
+
             if (!post) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
             if (!canEdit(interaction, post)) return interaction.reply({ flags: MessageFlags.Ephemeral, content: '写真の編集は投稿者のみです' });
 
@@ -6203,7 +6227,6 @@ client.on(Events.InteractionCreate, async interaction => {
             if (action === 'next' && total) pv.idx = (pv.idx + 1) % total;
 
             if (action === 'add') {
-
                 const waitPayload = {
                     content: '',
                     embeds: [photoAddWaitingEmbed(post.name)],
@@ -6227,7 +6250,6 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (action === 'del') {
-                const urls = imageUrls(post);
                 if (!urls.length) {
                     return interaction.reply({ flags: MessageFlags.Ephemeral, content: '写真がありません' });
                 }
@@ -6286,7 +6308,6 @@ client.on(Events.InteractionCreate, async interaction => {
             const urls2 = imageUrls(post);
             const newTotal = urls2.length;
 
-            // idx補正（削除後とかで範囲外になるのを防ぐ）
             if (pv.idx >= newTotal) pv.idx = Math.max(0, newTotal - 1);
 
             const embed = new EmbedBuilder()
