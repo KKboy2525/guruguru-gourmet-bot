@@ -2776,7 +2776,7 @@ function searchPanelComponents(guildId, userId, st = {}) {
                 .setStyle(ButtonStyle.Secondary),
 
             new ButtonBuilder()
-                .setCustomId(`search:back:${guildId}:${userId}`)
+                .setCustomId(`search:home:${guildId}:${userId}`)
                 .setLabel('🏠 ホーム')
                 .setStyle(ButtonStyle.Secondary)
         ),
@@ -5675,15 +5675,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (id.startsWith('search:run:')) {
             const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+            }
 
             await interaction.deferUpdate();
-
-            await ensureViewerCachesLoaded(interaction.guild, userId);
-
-            const serverRow = await ensureServerRowByGuildId(guildId);
-            const merged = await getViewerTagSourceCache(interaction.guild, userId);
 
             const st = searchState.get(k) ?? {
                 userIdFilter: null,
@@ -5695,16 +5694,78 @@ client.on(Events.InteractionCreate, async interaction => {
                 page: 0
             };
 
+            const serverRow = await ensureServerRowByGuildId(guildId);
+            if (!serverRow) {
+                st.results = [];
+                st.page = 0;
+                searchState.set(k, st);
+
+                return interaction.editReply({
+                    content: 'サーバー情報が見つかりません',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+            }
+
+            const { data, error } = await supabase
+                .from('posts')
+                .select(`
+            id,
+            server_id,
+            user_id,
+            shop_id,
+            shop_name,
+            shop_prefecture,
+            shop_map_url,
+            shop_website_url,
+            visited,
+            rating,
+            comment,
+            visited_date,
+            visibility,
+            created_at,
+            updated_at,
+            users!posts_user_id_fkey (
+                id,
+                discord_user_id,
+                name
+            ),
+            post_images (
+                id,
+                image_url,
+                storage_path,
+                sort_order
+            ),
+            post_tags (
+                tag_id,
+                tags (
+                    id,
+                    name
+                )
+            ),
+            post_visible_servers (
+                server_id,
+                servers (
+                    id,
+                    discord_server_id,
+                    name
+                )
+            )
+        `)
+                .in('visibility', ['public', 'server'])
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
             const results = [];
 
-            for (const p of merged.values()) {
-                // 検索結果には非公開投稿を出さない（投稿者本人でも除外）
-                if (p.visibility === 'private') continue;
+            for (const row of data ?? []) {
+                const p = mapDbPostToView(row);
 
                 if (!canViewPost({
                     viewerDiscordUserId: userId,
                     viewerDiscordGuildId: guildId,
-                    viewerServerRowId: serverRow?.id ?? null,
+                    viewerServerRowId: serverRow.id,
                     post: p,
                 })) continue;
 
@@ -5731,54 +5792,47 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
                 }
 
-                if ((st.keyword ?? '').trim()) {
-                    const keywords = (st.keyword ?? '')
-                        .normalize('NFKC')
-                        .toLowerCase()
-                        .trim()
-                        .split(/[ \u3000]+/)
+                if (st.keyword) {
+                    const words = st.keyword
+                        .split(/\s+/)
+                        .map(x => String(x ?? '').normalize('NFKC').toLowerCase().trim())
                         .filter(Boolean);
 
-                    const hay = [
-                        p.name ?? '',
-                        p.comment ?? '',
-                        p.prefecture ?? '',
-                        ...(p.tags ?? [])
-                    ]
-                        .join('\n')
-                        .normalize('NFKC')
-                        .toLowerCase();
+                    if (words.length) {
+                        const haystack = [
+                            p.name,
+                            p.prefecture,
+                            p.comment,
+                            p.created_by_name,
+                            ...(p.tags ?? []),
+                        ]
+                            .map(x => String(x ?? '').normalize('NFKC').toLowerCase())
+                            .join(' ');
 
-                    let ok = true;
-                    for (const kw of keywords) {
-                        if (!hay.includes(kw)) {
-                            ok = false;
-                            break;
+                        if (!words.every(word => haystack.includes(word))) {
+                            continue;
                         }
                     }
-                    if (!ok) continue;
                 }
 
                 if (st.ratingFilters?.length) {
-                    if (!st.ratingFilters.includes(Number(p.rating))) continue;
+                    const rating = Number(p.rating);
+                    if (!st.ratingFilters.includes(rating)) continue;
                 }
 
-                results.push(p);
+                results.push(p.id);
             }
 
-            results.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-            st.results = results.map(p => p.id);
+            st.results = results;
             st.page = 0;
             searchState.set(k, st);
 
-            if (!st.results.length) {
-                await interaction.editReply({
+            if (!results.length) {
+                return interaction.editReply({
                     content: '該当する記録がありません',
                     embeds: [searchPanelEmbed(st)],
                     components: searchPanelComponents(guildId, userId, st),
                 });
-                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-                return;
             }
 
             return renderSearchResultList(interaction, guildId, userId, { update: true });
