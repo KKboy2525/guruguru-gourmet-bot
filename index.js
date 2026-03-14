@@ -6648,14 +6648,15 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
+                const st = mineState.get(k);
+                const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
+                const postMap = new Map(ownPosts.map(p => [p.id, p]));
+
                 await ensureViewerCachesLoaded(interaction.guild, userId);
 
-                const post = await getPostByIdForViewer(
-                    postId,
-                    guildId,
-                    userId,
-                    { forceRefresh: true }
-                );
+                const post =
+                    postMap.get(postId) ??
+                    await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
 
                 if (!post) {
                     return interaction.update({
@@ -6673,7 +6674,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     post,
                     guildId,
                     userId,
-                    fromMine,
+                    fromMine: true,
                     total: 1,
                     forceHomeBack,
                 });
