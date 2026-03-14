@@ -3078,6 +3078,7 @@ async function updateLike(interaction, payload) {
     return interaction.update(payload);
 }
 
+// renderMineList
 async function renderMineList(interaction, guildId, userId, { update = false } = {}) {
     const k = keyOf(guildId, userId);
     const st = mineState.get(k);
@@ -3086,74 +3087,42 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         const e = new EmbedBuilder()
             .setTitle('📚 自分の記録')
             .setDescription('(まだありません)');
-
-        const payload = {
-            embeds: [e],
-            components: homeComponents(),
-        };
-
-        if (update) {
-            return updateLike(interaction, payload);
-        }
-
-        await interaction.reply({
-            flags: MessageFlags.Ephemeral,
-            ...payload,
-        });
+        const payload = { embeds: [e], components: homeComponents() };
+        if (update) return updateLike(interaction, payload);
+        await interaction.reply({ flags: MessageFlags.Ephemeral, ...payload });
         await rememberUiReply(interaction, guildId, userId);
         return;
     }
 
-    const resolved = [];
+    await ensureViewerCachesLoaded(interaction.guild, userId);
+    const ownPosts = await resolvePostsForIds(guildId, userId, st.results);
 
-    for (const pid of st.results) {
-        const p = await getPostByIdForViewer(pid, guildId, userId, { forceRefresh: false });
-        if (!p) continue;
-        if (!visitFilterMatch(st, p)) continue;
-        resolved.push(p);
-    }
+    const filtered = ownPosts.filter(p => visitFilterMatch(st, p));
 
-    if (!resolved.length) {
+    if (!filtered.length) {
         const e = new EmbedBuilder()
             .setTitle('📚 自分の記録')
             .setDescription('(まだありません)');
-
-        const payload = {
-            embeds: [e],
-            components: homeComponents(),
-        };
-
-        if (update) {
-            return updateLike(interaction, payload);
-        }
-
-        await interaction.reply({
-            flags: MessageFlags.Ephemeral,
-            ...payload,
-        });
+        const payload = { embeds: [e], components: homeComponents() };
+        if (update) return updateLike(interaction, payload);
+        await interaction.reply({ flags: MessageFlags.Ephemeral, ...payload });
         await rememberUiReply(interaction, guildId, userId);
         return;
     }
 
-    const filteredIds = resolved.map(p => p.id);
-    const postMap = new Map(resolved.map(p => [p.id, p]));
     const pageSize = 9;
-
     let page = Math.max(0, Number(st.page) || 0);
-    const maxPage = Math.max(0, Math.ceil(filteredIds.length / pageSize) - 1);
+    const maxPage = Math.max(0, Math.ceil(filtered.length / pageSize) - 1);
     if (page > maxPage) page = maxPage;
     st.page = page;
     mineState.set(k, st);
 
     const start = page * pageSize;
-    const sliceIds = filteredIds.slice(start, start + pageSize);
-    const slice = sliceIds
-        .map(pid => postMap.get(pid))
-        .filter(Boolean);
+    const slice = filtered.slice(start, start + pageSize);
 
     const listHeader = new EmbedBuilder()
         .setTitle('📚 自分の記録')
-        .setDescription(`表示 ${start + 1}-${start + slice.length} / ${filteredIds.length} 件`);
+        .setDescription(`表示 ${start + 1}-${start + slice.length} / ${filtered.length} 件`);
 
     const options = slice.slice(0, 25).map(p => ({
         label: (p.name ?? '').slice(0, 100),
@@ -3162,24 +3131,13 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     }));
 
     const hasPrev = page > 0;
-    const hasNext = start + pageSize < filteredIds.length;
-
+    const hasNext = start + pageSize < filtered.length;
     const comps = mineListComponents(guildId, userId, page, hasPrev, hasNext, options, st);
     const embeds = [listHeader, ...slice.map(buildCardEmbed)];
+    const payload = { embeds, components: comps };
 
-    const payload = {
-        embeds,
-        components: comps,
-    };
-
-    if (update) {
-        return updateLike(interaction, payload);
-    }
-
-    await interaction.reply({
-        flags: MessageFlags.Ephemeral,
-        ...payload,
-    });
+    if (update) return updateLike(interaction, payload);
+    await interaction.reply({ flags: MessageFlags.Ephemeral, ...payload });
     await rememberUiReply(interaction, guildId, userId);
 }
 
@@ -5394,76 +5352,48 @@ client.on(Events.InteractionCreate, async interaction => {
             return;
         }
 
+        // home:mine
         if (id === 'home:mine') {
             await interaction.deferUpdate();
 
             const currentMine = mineState.get(k);
+            const needReload = !Array.isArray(currentMine?.results);
 
-            if (!currentMine?.results?.length) {
+            if (needReload) {
+                const { data: userRow, error: userErr } = await supabase
+                    .from('users')
+                    .select('id')
+                    .eq('discord_user_id', userId)
+                    .maybeSingle();
+
+                if (userErr) throw userErr;
+
+                if (!userRow) {
+                    mineState.set(k, {
+                        results: [],
+                        page: 0,
+                        visitFilter: currentMine?.visitFilter ?? 'all',
+                    });
+                    await renderMineList(interaction, guildId, userId, { update: true });
+                    await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                    return;
+                }
+
                 const { data, error } = await supabase
                     .from('posts')
-                    .select(`
-                id,
-                server_id,
-                user_id,
-                shop_id,
-                shop_name,
-                shop_prefecture,
-                shop_map_url,
-                shop_website_url,
-                visited,
-                rating,
-                comment,
-                visited_date,
-                visibility,
-                created_at,
-                updated_at,
-                users!posts_user_id_fkey!inner (
-                    id,
-                    discord_user_id,
-                    name
-                ),
-                post_images (
-                    id,
-                    image_url,
-                    storage_path,
-                    sort_order
-                ),
-                post_tags (
-                    tag_id,
-                    tags (
-                        id,
-                        name
-                    )
-                ),
-                post_visible_servers (
-                    server_id,
-                    servers (
-                        id,
-                        discord_server_id,
-                        name
-                    )
-                )
-            `)
-                    .eq('users.discord_user_id', userId)
+                    .select('id')
+                    .eq('user_id', userRow.id)
                     .order('created_at', { ascending: false });
 
-                if (error) {
-                    throw error;
-                }
-
-                const minePosts = (data ?? []).map(mapDbPostToView);
-
-                for (const post of minePosts) {
-                    upsertCachedPostForViewer(guildId, userId, post);
-                }
+                if (error) throw error;
 
                 mineState.set(k, {
-                    results: minePosts.map(p => p.id),
-                    posts: minePosts,
+                    results: (data ?? []).map(x => x.id),
                     page: 0,
                     visitFilter: currentMine?.visitFilter ?? 'all',
                 });
+
+                await ensureViewerCachesLoaded(interaction.guild, userId);
             }
 
             await renderMineList(interaction, guildId, userId, { update: true });
@@ -6657,21 +6587,19 @@ client.on(Events.InteractionCreate, async interaction => {
             if (!id.startsWith('mine:pick:')) return;
 
             const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+            if (interaction.guildId !== gid) return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+            if (userId !== ownerId) return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
 
             const postId = interaction.values?.[0];
             if (!postId || postId === 'none') {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '選択が不正です' });
+                return interaction.reply({ ephemeral: true, content: '選択が不正です' });
             }
 
-            await interaction.deferUpdate();
-
             await ensureViewerCachesLoaded(interaction.guild, userId);
-            const post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
+            const post = await getPostByIdForViewer(postId, guildId, userId);
 
             if (!post) {
-                return interaction.editReply({
+                return interaction.update({
                     content: 'データが見つかりません',
                     embeds: [],
                     components: homeComponents(),
