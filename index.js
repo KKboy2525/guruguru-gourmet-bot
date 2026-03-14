@@ -438,12 +438,15 @@ async function getPostByIdForViewer(postId, guildId, viewerDiscordUserId, option
         return null;
     }
 
-    if (!canViewPost({
-        viewerDiscordUserId,
-        viewerDiscordGuildId: guildId,
-        viewerServerRowId: serverRow?.id ?? null,
-        post: fresh,
-    })) {
+    if (
+        fresh.created_by !== viewerDiscordUserId &&
+        !canViewPost({
+            viewerDiscordUserId,
+            viewerDiscordGuildId: guildId,
+            viewerServerRowId: serverRow?.id ?? null,
+            post: fresh,
+        })
+    ) {
         removeCachedPostForViewer(guildId, viewerDiscordUserId, postId);
         return null;
     }
@@ -6650,7 +6653,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 let st = mineState.get(k);
                 let ownPosts = Array.isArray(st?.posts) ? st.posts : [];
-
                 let post = ownPosts.find(p => String(p.id) === String(postId));
 
                 if (!post) {
