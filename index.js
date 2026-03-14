@@ -6652,12 +6652,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 const st = mineState.get(k);
                 const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
-                const postMap = new Map(ownPosts.map(p => [p.id, p]));
 
                 await ensureViewerCachesLoaded(interaction.guild, userId);
 
                 const post =
-                    postMap.get(postId) ??
+                    ownPosts.find(p => p.id === postId) ??
                     await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
 
                 if (!post) {
