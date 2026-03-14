@@ -3097,6 +3097,10 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     await ensureViewerCachesLoaded(interaction.guild, userId);
     const ownPosts = await resolvePostsForIds(guildId, userId, st.results);
 
+    // 自分の記録一覧で実際に表示できた投稿を保持
+    st.posts = ownPosts;
+    mineState.set(k, st);
+
     const filtered = ownPosts.filter(p => visitFilterMatch(st, p));
 
     if (!filtered.length) {
@@ -6596,7 +6600,16 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             await ensureViewerCachesLoaded(interaction.guild, userId);
-            const post = await getPostByIdForViewer(postId, guildId, userId);
+
+            const st = mineState.get(k);
+            const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
+            const postMap = new Map(ownPosts.map(p => [p.id, p]));
+
+            let post = postMap.get(postId);
+
+            if (!post) {
+                post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
+            }
 
             if (!post) {
                 return interaction.update({
@@ -6615,7 +6628,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 forceHomeBack: false,
             });
 
-            await interaction.editReply({
+            await interaction.update({
                 content: '',
                 embeds: [detail],
                 components,
