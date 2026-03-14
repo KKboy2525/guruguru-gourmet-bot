@@ -2999,7 +2999,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         return;
     }
 
-    const ownPosts = Array.isArray(st.posts) ? st.posts : [];
+    const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
     const postMap = new Map(ownPosts.map(p => [p.id, p]));
 
     const filteredIds = [];
@@ -5324,7 +5324,6 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (id === 'home:mine') {
-
             await interaction.deferUpdate();
 
             const currentMine = mineState.get(k);
@@ -5342,8 +5341,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 if (!userRow) {
                     mineState.set(k, {
-                        results: minePosts.map(p => p.id),
-                        posts: minePosts,
+                        results: [],
+                        posts: [],
                         page: 0,
                         visitFilter: currentMine?.visitFilter ?? 'all',
                     });
@@ -5356,48 +5355,48 @@ client.on(Events.InteractionCreate, async interaction => {
                 const { data, error } = await supabase
                     .from('posts')
                     .select(`
-    id,
-    server_id,
-    user_id,
-    shop_id,
-    shop_name,
-    shop_prefecture,
-    shop_map_url,
-    shop_website_url,
-    visited,
-    rating,
-    comment,
-    visited_date,
-    visibility,
-    created_at,
-    updated_at,
-    users!posts_user_id_fkey (
-        id,
-        discord_user_id,
-        name
-    ),
-    post_images (
-        id,
-        image_url,
-        storage_path,
-        sort_order
-    ),
-    post_tags (
-        tag_id,
-        tags (
-            id,
-            name
-        )
-    ),
-    post_visible_servers (
-        server_id,
-        servers (
-            id,
-            discord_server_id,
-            name
-        )
-    )
-`)
+                id,
+                server_id,
+                user_id,
+                shop_id,
+                shop_name,
+                shop_prefecture,
+                shop_map_url,
+                shop_website_url,
+                visited,
+                rating,
+                comment,
+                visited_date,
+                visibility,
+                created_at,
+                updated_at,
+                users!posts_user_id_fkey (
+                    id,
+                    discord_user_id,
+                    name
+                ),
+                post_images (
+                    id,
+                    image_url,
+                    storage_path,
+                    sort_order
+                ),
+                post_tags (
+                    tag_id,
+                    tags (
+                        id,
+                        name
+                    )
+                ),
+                post_visible_servers (
+                    server_id,
+                    servers (
+                        id,
+                        discord_server_id,
+                        name
+                    )
+                )
+            `)
                     .eq('user_id', userRow.id)
                     .order('created_at', { ascending: false });
 
@@ -5840,7 +5839,11 @@ client.on(Events.InteractionCreate, async interaction => {
             if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
 
             await ensureCacheLoadedForGuild(interaction.guild, userId);
-            const post = await getPostByIdForViewer(postId, guildId, userId);
+
+            const mine = mineState.get(k);
+            const minePostMap = new Map((mine?.posts ?? []).map(p => [p.id, p]));
+            const post = minePostMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
+
             if (!post) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
 
             const urls = imageUrls(post);
@@ -5939,20 +5942,20 @@ client.on(Events.InteractionCreate, async interaction => {
             const [, , vis, gid, ownerId, postId] = id.split(':');
 
             if (interaction.guildId !== gid) {
-                return interaction.reply({ ephemeral: true, content: 'ギルド不一致です' });
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
             }
             if (userId !== ownerId) {
-                return interaction.reply({ ephemeral: true, content: 'これはあなたの操作ではありません' });
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
             }
 
             if (!['private', 'server', 'public'].includes(vis)) {
-                return interaction.reply({ ephemeral: true, content: '公開範囲が不正です' });
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '公開範囲が不正です' });
             }
 
             const settings = await getServerSettingsByGuildId(guildId);
             if (vis === 'public' && settings.allow_public_post === false) {
                 return interaction.reply({
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                     content: 'このサーバーでは全体公開は許可されていません'
                 });
             }
@@ -5965,11 +5968,11 @@ client.on(Events.InteractionCreate, async interaction => {
             const post = minePostMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId);
 
             if (!post) {
-                return interaction.reply({ ephemeral: true, content: 'データが見つかりません' });
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
             }
 
             if (!canEdit(interaction, post)) {
-                return interaction.reply({ ephemeral: true, content: '変更できるのは投稿者のみです' });
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '変更できるのは投稿者のみです' });
             }
 
             const updatedAt = nowIso();
@@ -6008,7 +6011,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
             if (mine?.posts) {
                 mine.posts = [fresh, ...mine.posts.filter(x => x.id !== postId)];
-                mine.results = [fresh.id, ...mine.results.filter(x => x !== postId)];
+                mine.results = [fresh.id, ...((mine.results ?? []).filter(x => x !== postId))];
                 mineState.set(k, mine);
             }
 
@@ -6358,9 +6361,6 @@ client.on(Events.InteractionCreate, async interaction => {
             const st = mineState.get(k);
             if (!st?.results?.length) return interaction.reply({ flags: MessageFlags.Ephemeral, content: '一覧がありません' });
 
-            await ensureCacheLoadedForGuild(interaction.guild, userId);
-            const cache = getGuildCache(guildId);
-
             const ownPosts = Array.isArray(st.posts) ? st.posts : [];
             const postMap = new Map(ownPosts.map(p => [p.id, p]));
             const filteredIds = [];
@@ -6373,25 +6373,14 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             if (!filteredIds.length) {
-                const e = new EmbedBuilder()
-                    .setTitle('📚 自分の記録')
-                    .setDescription('(まだありません)');
-
-                const payload = {
-                    embeds: [e],
+                return interaction.update({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('📚 自分の記録')
+                            .setDescription('(まだありません)')
+                    ],
                     components: homeComponents(),
-                };
-
-                if (update) {
-                    return updateLike(interaction, payload);
-                }
-
-                await interaction.reply({
-                    flags: MessageFlags.Ephemeral,
-                    ...payload,
                 });
-                await rememberUiReply(interaction, guildId, userId);
-                return;
             }
 
             const pageSize = 9;
