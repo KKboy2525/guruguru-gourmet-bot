@@ -6633,6 +6633,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
                 await ensureViewerCachesLoaded(interaction.guild, userId);
                 const post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
+
                 if (!post) {
                     return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
                 }
