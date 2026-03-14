@@ -1238,6 +1238,8 @@ function canViewPost({ viewerDiscordUserId, viewerDiscordGuildId, viewerServerRo
         if (viewerServerRowId && rowIds.includes(viewerServerRowId)) return true;
         if (viewerDiscordGuildId && guildIds.includes(viewerDiscordGuildId)) return true;
 
+        if (viewerServerRowId && post.server_id === viewerServerRowId) return true;
+
         return false;
     }
 
@@ -5251,6 +5253,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 components,
             });
 
+            const ss = searchState.get(k);
+            if (ss?.results?.length) {
+                if (fresh.visibility === 'private') {
+                    ss.results = ss.results.filter(x => String(x) !== String(postId));
+                    ss.page = 0;
+                    searchState.set(k, ss);
+                }
+            }
+
             await interaction.followUp({
                 content: '✅ 更新しました',
                 flags: MessageFlags.Ephemeral,
@@ -6032,10 +6043,47 @@ client.on(Events.InteractionCreate, async interaction => {
                 draftRating.set(k, d);
             }
 
+            const nav = getDetailNavState(guildId, userId, postId);
+            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
+            const forceHomeBack = nav?.forceHomeBack ?? false;
+            const fromSearch = !fromMine && !forceHomeBack;
+
             const fresh = await syncPostAfterWrite(postId, guildId, userId);
 
             if (!fresh) {
                 removePostFromUiState(guildId, userId, postId);
+
+                if (fromSearch) {
+                    const st = searchState.get(k);
+                    if (st?.results?.length) {
+                        await renderSearchResultList(interaction, guildId, userId, { update: true });
+                        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                        return;
+                    }
+
+                    return interaction.editReply({
+                        content: '',
+                        embeds: [searchPanelEmbed(st ?? {
+                            userIdFilter: null,
+                            prefectureFilters: [],
+                            tagFilters: [],
+                            keyword: '',
+                            ratingFilters: [],
+                            results: [],
+                            page: 0,
+                        })],
+                        components: searchPanelComponents(guildId, userId, st ?? {
+                            userIdFilter: null,
+                            prefectureFilters: [],
+                            tagFilters: [],
+                            keyword: '',
+                            ratingFilters: [],
+                            results: [],
+                            page: 0,
+                        }),
+                    });
+                }
+
                 return interaction.editReply({
                     content: '',
                     embeds: [homeEmbed()],
@@ -6053,6 +6101,37 @@ client.on(Events.InteractionCreate, async interaction => {
             })) {
                 removePostFromUiState(guildId, userId, postId);
 
+                if (fromSearch) {
+                    const st = searchState.get(k);
+                    if (st?.results?.length) {
+                        await renderSearchResultList(interaction, guildId, userId, { update: true });
+                        await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                        return;
+                    }
+
+                    return interaction.editReply({
+                        content: '',
+                        embeds: [searchPanelEmbed(st ?? {
+                            userIdFilter: null,
+                            prefectureFilters: [],
+                            tagFilters: [],
+                            keyword: '',
+                            ratingFilters: [],
+                            results: [],
+                            page: 0,
+                        })],
+                        components: searchPanelComponents(guildId, userId, st ?? {
+                            userIdFilter: null,
+                            prefectureFilters: [],
+                            tagFilters: [],
+                            keyword: '',
+                            ratingFilters: [],
+                            results: [],
+                            page: 0,
+                        }),
+                    });
+                }
+
                 return interaction.editReply({
                     content: '',
                     embeds: [homeEmbed()],
@@ -6060,9 +6139,22 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            const nav = getDetailNavState(guildId, userId, postId);
-            const fromMine = nav?.fromMine ?? cameFromMine(k, postId, mineState);
-            const forceHomeBack = nav?.forceHomeBack ?? false;
+            // 検索由来なら検索結果IDにも反映
+            if (fromSearch) {
+                const st = searchState.get(k);
+                if (st?.results?.length) {
+                    if (fresh.visibility === 'private') {
+                        st.results = st.results.filter(x => String(x) !== String(postId));
+                    } else if (!st.results.includes(fresh.id)) {
+                        st.results.unshift(fresh.id);
+                    }
+
+                    const pageSize = 9;
+                    const maxPage = Math.max(0, Math.ceil(st.results.length / pageSize) - 1);
+                    st.page = Math.min(Math.max(0, Number(st.page) || 0), maxPage);
+                    searchState.set(k, st);
+                }
+            }
 
             const { detail, components } = await renderDetail(interaction, {
                 post: fresh,
