@@ -1209,39 +1209,22 @@ function hasRating(post) {
     return post?.visited !== false && post?.rating != null;
 }
 
-function visibilityLabel(v) {
-    if (v === 'private') return '🔒 非公開';
-    if (v === 'public') return '🌍 全体公開';
-    return '🖥 サーバー公開';
-}
-
 function canViewPost({ viewerDiscordUserId, viewerDiscordGuildId, viewerServerRowId, post }) {
     if (!post) return false;
 
-    // 投稿者本人は常に見える
     if (post.created_by === viewerDiscordUserId) {
         return true;
-    }
-
-    if (post.visibility === 'private') {
-        return false;
     }
 
     if (post.visibility === 'public') {
         return true;
     }
 
-    if (post.visibility === 'server') {
-        const rowIds = post.visible_server_row_ids ?? [];
-        const guildIds = post.visible_server_ids ?? [];
+    const rowIds = post.visible_server_row_ids ?? [];
+    const guildIds = post.visible_server_ids ?? [];
 
-        if (viewerServerRowId && rowIds.includes(viewerServerRowId)) return true;
-        if (viewerDiscordGuildId && guildIds.includes(viewerDiscordGuildId)) return true;
-
-        if (viewerServerRowId && post.server_id === viewerServerRowId) return true;
-
-        return false;
-    }
+    if (viewerServerRowId && rowIds.includes(viewerServerRowId)) return true;
+    if (viewerDiscordGuildId && guildIds.includes(viewerDiscordGuildId)) return true;
 
     return false;
 }
@@ -1359,7 +1342,6 @@ function buildPostEmbedForView(post, { sharedByUserId = null, imageIndex = null,
     }
 
     lines.push(`🏷 ${safeText(tagString(post.tags), 500)}`);
-    lines.push(`🌐 ${visibilityLabel(post.visibility)}`);
     lines.push(`👤 登録者 <@${post.created_by}>`);
 
     if (sharedByUserId) {
@@ -1516,7 +1498,7 @@ async function ensurePublicCacheLoadedForGuild(guild, viewerDiscordUserId = null
                 )
             )
         `)
-        .in('visibility', ['public', 'server'])
+        .in('visibility', ['private', 'public'])
         .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -2135,7 +2117,7 @@ function editPanelComponents(guildId, userId, d = {}) {
 async function getServerSettingsByGuildId(guildId) {
     const serverRow = await ensureServerRowByGuildId(guildId);
     if (!serverRow) {
-        return { default_visibility: 'server', allow_public_post: true };
+        return { default_visibility: 'private', allow_public_post: true };
     }
 
     const { data, error } = await supabase
@@ -2146,7 +2128,7 @@ async function getServerSettingsByGuildId(guildId) {
 
     if (error) throw error;
 
-    return data ?? { default_visibility: 'server', allow_public_post: true };
+    return data ?? { default_visibility: 'private', allow_public_post: true };
 }
 
 async function renderCreatePanel(interaction, guildId, userId, { update = true } = {}) {
@@ -3251,7 +3233,9 @@ function detailActionComponents(
         total = 1,
         forceHomeBack = false,
         hasPhotos = false,
-        visibility = 'server',
+        visibility = 'private',
+        visibleServerIds = [],
+        guildName = 'このサーバー',
         allowPublicPost = true,
     } = {}
 ) {
@@ -3259,7 +3243,15 @@ function detailActionComponents(
 
     if (canEditThis) {
         rows.push(
-            visibilityComponents(guildId, userId, postId, visibility, allowPublicPost)
+            visibilityComponents(
+                guildId,
+                userId,
+                postId,
+                visibility,
+                visibleServerIds,
+                guildName,
+                allowPublicPost
+            )
         );
     }
 
@@ -3309,27 +3301,30 @@ function visibilityComponents(
     guildId,
     userId,
     postId,
-    currentVisibility = 'server',
+    currentVisibility = 'private',
+    visibleServerIds = [],
+    guildName = 'このサーバー',
     allowPublicPost = true
 ) {
-    const current = currentVisibility || 'server';
+    const isGlobal = currentVisibility === 'public';
+    const isServerVisible =
+        Array.isArray(visibleServerIds) && visibleServerIds.includes(guildId);
 
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId(`res:vis:private:${guildId}:${userId}:${postId}`)
-            .setLabel(`${current === 'private' ? '◉' : '○'} 非公開`)
-            .setStyle(ButtonStyle.Secondary),
-
-        new ButtonBuilder()
-            .setCustomId(`res:vis:server:${guildId}:${userId}:${postId}`)
-            .setLabel(`${current === 'server' ? '◉' : '○'} サーバー公開`)
-            .setStyle(ButtonStyle.Secondary),
-
-        new ButtonBuilder()
-            .setCustomId(`res:vis:public:${guildId}:${userId}:${postId}`)
-            .setLabel(`${current === 'public' ? '◉' : '○'} 全体公開`)
+            .setCustomId(`res:vis:toggleGlobal:${guildId}:${userId}:${postId}`)
+            .setLabel(isGlobal ? '全体公開にする' : '非公開にする')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(!allowPublicPost)
+            .setDisabled(!isGlobal && !allowPublicPost),
+
+        new ButtonBuilder()
+            .setCustomId(`res:vis:toggleServer:${guildId}:${userId}:${postId}`)
+            .setLabel(
+                isServerVisible
+                    ? `${guildName}に非公開にする`
+                    : `${guildName}に公開する`
+            )
+            .setStyle(ButtonStyle.Secondary)
     );
 }
 
@@ -3371,7 +3366,9 @@ async function renderDetail(
         total,
         forceHomeBack,
         hasPhotos: urls.length > 1,
-        visibility: post.visibility ?? 'server',
+        visibility: post.visibility ?? 'private',
+        visibleServerIds: post.visible_server_ids ?? [],
+        guildName: interaction.guild?.name ?? 'このサーバー',
         allowPublicPost: settings.allow_public_post !== false,
     });
 
@@ -4837,7 +4834,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 mapUrl: '',
                 name: '',
                 channelId: interaction.channelId,
-                visibility: 'server',
+                visibility: 'private',
                 visibleServerIds: [guildId],
             });
 
@@ -5284,7 +5281,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 mapUrl: '',
                 name: '',
                 channelId: interaction.channelId,
-                visibility: 'server',
+                visibility: 'private',
                 visibleServerIds: [guildId],
             });
 
@@ -5763,7 +5760,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 )
             )
         `)
-                .in('visibility', ['public', 'server'])
+                .in('visibility', ['private', 'public'])
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -5985,7 +5982,7 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (id.startsWith('res:vis:')) {
-            const [, , vis, gid, ownerId, postId] = id.split(':');
+            const [, , action, gid, ownerId, postId] = id.split(':');
 
             if (interaction.guildId !== gid) {
                 return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
@@ -5994,17 +5991,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
             }
 
-            if (!['private', 'server', 'public'].includes(vis)) {
-                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '公開範囲が不正です' });
+            if (!['toggleGlobal', 'toggleServer'].includes(action)) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: '公開操作が不正です' });
             }
 
             const settings = await getServerSettingsByGuildId(guildId);
-            if (vis === 'public' && settings.allow_public_post === false) {
-                return interaction.reply({
-                    flags: MessageFlags.Ephemeral,
-                    content: 'このサーバーでは全体公開は許可されていません'
-                });
-            }
 
             await interaction.deferUpdate();
 
@@ -6019,27 +6010,48 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.followUp({ flags: MessageFlags.Ephemeral, content: '変更できるのは投稿者のみです' });
             }
 
+            let nextVisibility = post.visibility === 'public' ? 'public' : 'private';
+            let nextVisibleServerIds = Array.isArray(post.visible_server_ids)
+                ? [...post.visible_server_ids]
+                : [];
+
+            if (action === 'toggleGlobal') {
+                if (nextVisibility !== 'public' && settings.allow_public_post === false) {
+                    return interaction.followUp({
+                        flags: MessageFlags.Ephemeral,
+                        content: 'このサーバーでは全体公開は許可されていません'
+                    });
+                }
+
+                nextVisibility = nextVisibility === 'public' ? 'private' : 'public';
+            }
+
+            if (action === 'toggleServer') {
+                if (nextVisibleServerIds.includes(guildId)) {
+                    nextVisibleServerIds = nextVisibleServerIds.filter(x => x !== guildId);
+                } else {
+                    nextVisibleServerIds.push(guildId);
+                }
+            }
+
             const updatedAt = nowIso();
 
             const { error } = await supabase
                 .from('posts')
                 .update({
-                    visibility: vis,
+                    visibility: nextVisibility,
                     updated_at: updatedAt
                 })
                 .eq('id', postId);
 
             if (error) throw error;
 
-            await replacePostVisibleServers(
-                postId,
-                vis === 'server' ? [guildId] : []
-            );
+            await replacePostVisibleServers(postId, nextVisibleServerIds);
 
             const d = draftRating.get(k);
             if (d && d.mode === 'edit' && d.postId === postId) {
-                d.visibility = vis;
-                d.visibleServerIds = vis === 'server' ? [guildId] : [];
+                d.visibility = nextVisibility;
+                d.visibleServerIds = nextVisibleServerIds;
                 draftRating.set(k, d);
             }
 
@@ -6053,9 +6065,19 @@ client.on(Events.InteractionCreate, async interaction => {
             if (fromSearch) {
                 const st = searchState.get(k);
                 if (st?.results?.length) {
-                    if (fresh.visibility === 'private') {
+                    const stillVisible = fresh && canViewPost({
+                        viewerDiscordUserId: userId,
+                        viewerDiscordGuildId: guildId,
+                        viewerServerRowId: (await ensureServerRowByGuildId(guildId))?.id ?? null,
+                        post: fresh,
+                    });
+
+                    if (!stillVisible) {
                         st.results = st.results.filter(x => String(x) !== String(postId));
+                    } else if (!st.results.includes(postId)) {
+                        st.results.unshift(postId);
                     }
+
                     searchState.set(k, st);
                 }
             }
@@ -6149,11 +6171,17 @@ client.on(Events.InteractionCreate, async interaction => {
                 });
             }
 
-            // 検索由来なら検索結果IDにも反映
             if (fromSearch) {
                 const st = searchState.get(k);
                 if (st?.results?.length) {
-                    if (fresh.visibility === 'private') {
+                    const visible = canViewPost({
+                        viewerDiscordUserId: userId,
+                        viewerDiscordGuildId: guildId,
+                        viewerServerRowId: serverRow?.id ?? null,
+                        post: fresh,
+                    });
+
+                    if (!visible) {
                         st.results = st.results.filter(x => String(x) !== String(postId));
                     } else if (!st.results.includes(fresh.id)) {
                         st.results.unshift(fresh.id);
