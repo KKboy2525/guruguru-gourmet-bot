@@ -1207,8 +1207,13 @@ function visibilityLabel(v) {
 function canViewPost({ viewerDiscordUserId, viewerDiscordGuildId, viewerServerRowId, post }) {
     if (!post) return false;
 
+    // 投稿者本人は常に見える
+    if (post.created_by === viewerDiscordUserId) {
+        return true;
+    }
+
     if (post.visibility === 'private') {
-        return post.created_by === viewerDiscordUserId;
+        return false;
     }
 
     if (post.visibility === 'public') {
@@ -3093,7 +3098,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         const e = new EmbedBuilder()
             .setTitle('📚 自分の記録')
             .setDescription('(まだありません)');
-        const payload = { embeds: [e], components: homeComponents() };
+        const payload = { content: '', embeds: [e], components: homeComponents() };
         if (update) return updateLike(interaction, payload);
         await interaction.reply({ flags: MessageFlags.Ephemeral, ...payload });
         await rememberUiReply(interaction, guildId, userId);
@@ -3115,7 +3120,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
         const e = new EmbedBuilder()
             .setTitle('📚 自分の記録')
             .setDescription('(まだありません)');
-        const payload = { embeds: [e], components: homeComponents() };
+        const payload = { content: '', embeds: [e], components: homeComponents() };
         if (update) return updateLike(interaction, payload);
         await interaction.reply({ flags: MessageFlags.Ephemeral, ...payload });
         await rememberUiReply(interaction, guildId, userId);
@@ -3146,7 +3151,7 @@ async function renderMineList(interaction, guildId, userId, { update = false } =
     const hasNext = start + pageSize < filtered.length;
     const comps = mineListComponents(guildId, userId, page, hasPrev, hasNext, options, st);
     const embeds = [listHeader, ...slice.map(buildCardEmbed)];
-    const payload = { embeds, components: comps };
+    const payload = { content: '', embeds, components: comps };
 
     if (update) return updateLike(interaction, payload);
     await interaction.reply({ flags: MessageFlags.Ephemeral, ...payload });
@@ -3169,6 +3174,7 @@ async function renderSearchResultList(interaction, guildId, userId, { update = f
         };
 
         const payload = {
+            content: '',
             embeds: [searchPanelEmbed(panel)],
             components: searchPanelComponents(guildId, userId, panel),
         };
@@ -3214,7 +3220,7 @@ async function renderSearchResultList(interaction, guildId, userId, { update = f
     const embeds = [header, ...slice.map(buildSearchCardEmbed)];
     const components = searchResultListComponents(guildId, userId, page, hasPrev, hasNext, options);
 
-    const payload = { embeds, components };
+    const payload = { content: '', embeds, components };
 
     if (update) return updateLike(interaction, payload);
 
@@ -5382,92 +5388,86 @@ client.on(Events.InteractionCreate, async interaction => {
         if (id === 'home:mine') {
             await interaction.deferUpdate();
 
-            const currentMine = mineState.get(k);
-            const needReload =
-                !Array.isArray(currentMine?.results) ||
-                !Array.isArray(currentMine?.posts);
+            const { data: userRow, error: userErr } = await supabase
+                .from('users')
+                .select('id')
+                .eq('discord_user_id', userId)
+                .maybeSingle();
 
-            if (needReload) {
-                const { data: userRow, error: userErr } = await supabase
-                    .from('users')
-                    .select('id')
-                    .eq('discord_user_id', userId)
-                    .maybeSingle();
+            if (userErr) throw userErr;
 
-                if (userErr) throw userErr;
-
-                if (!userRow) {
-                    mineState.set(k, {
-                        results: [],
-                        posts: [],
-                        page: 0,
-                        visitFilter: currentMine?.visitFilter ?? 'all',
-                    });
-
-                    await renderMineList(interaction, guildId, userId, { update: true });
-                    await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-                    return;
-                }
-
-                const { data, error } = await supabase
-                    .from('posts')
-                    .select(`
-                id,
-                server_id,
-                user_id,
-                shop_id,
-                shop_name,
-                shop_prefecture,
-                shop_map_url,
-                shop_website_url,
-                visited,
-                rating,
-                comment,
-                visited_date,
-                visibility,
-                created_at,
-                updated_at,
-                users!posts_user_id_fkey (
-                    id,
-                    discord_user_id,
-                    name
-                ),
-                post_images (
-                    id,
-                    image_url,
-                    storage_path,
-                    sort_order
-                ),
-                post_tags (
-                    tag_id,
-                    tags (
-                        id,
-                        name
-                    )
-                ),
-                post_visible_servers (
-                    server_id,
-                    servers (
-                        id,
-                        discord_server_id,
-                        name
-                    )
-                )
-            `)
-                    .eq('user_id', userRow.id)
-                    .order('created_at', { ascending: false });
-
-                if (error) throw error;
-
-                const minePosts = (data ?? []).map(mapDbPostToView);
-
+            if (!userRow) {
                 mineState.set(k, {
-                    results: minePosts.map(x => x.id),
-                    posts: minePosts,
+                    results: [],
+                    posts: [],
                     page: 0,
-                    visitFilter: currentMine?.visitFilter ?? 'all',
+                    visitFilter: mineState.get(k)?.visitFilter ?? 'all',
                 });
+
+                await renderMineList(interaction, guildId, userId, { update: true });
+                await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+                return;
             }
+
+            const { data, error } = await supabase
+                .from('posts')
+                .select(`
+            id,
+            server_id,
+            user_id,
+            shop_id,
+            shop_name,
+            shop_prefecture,
+            shop_map_url,
+            shop_website_url,
+            visited,
+            rating,
+            comment,
+            visited_date,
+            visibility,
+            created_at,
+            updated_at,
+            users!posts_user_id_fkey (
+                id,
+                discord_user_id,
+                name
+            ),
+            post_images (
+                id,
+                image_url,
+                storage_path,
+                sort_order
+            ),
+            post_tags (
+                tag_id,
+                tags (
+                    id,
+                    name
+                )
+            ),
+            post_visible_servers (
+                server_id,
+                servers (
+                    id,
+                    discord_server_id,
+                    name
+                )
+            )
+        `)
+                .eq('user_id', userRow.id)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            const minePosts = (data ?? []).map(mapDbPostToView);
+            const visitFilter = mineState.get(k)?.visitFilter ?? 'all';
+
+            mineState.set(k, {
+                results: minePosts.map(x => x.id),
+                posts: minePosts,
+                page: 0,
+                visitFilter,
+            });
 
             await renderMineList(interaction, guildId, userId, { update: true });
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
@@ -6635,7 +6635,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 }
 
                 await ensureViewerCachesLoaded(interaction.guild, userId);
-                const post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
+                const post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: true });
 
                 if (!post) {
                     return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'データが見つかりません' });
@@ -6672,25 +6672,17 @@ client.on(Events.InteractionCreate, async interaction => {
                 return interaction.reply({ flags: MessageFlags.Ephemeral, content: '選択が不正です' });
             }
 
-            const st = mineState.get(k);
-            const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
+            await interaction.deferUpdate();
 
-            if (!ownPosts.length) {
-                return interaction.update({
-                    content: '自分の記録データが読み込まれていません',
-                    embeds: [],
-                    components: homeComponents(),
-                });
-            }
-            const postMap = new Map(ownPosts.map(p => [p.id, p]));
-            const post = postMap.get(postId);
+            const post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: true });
 
             if (!post) {
-                return interaction.update({
+                await interaction.editReply({
                     content: 'データが見つかりません',
                     embeds: [],
                     components: homeComponents(),
                 });
+                return;
             }
 
             const { detail, components } = await renderDetail(interaction, {
@@ -6702,7 +6694,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 forceHomeBack: false,
             });
 
-            await interaction.update({
+            await interaction.editReply({
                 content: '',
                 embeds: [detail],
                 components,
