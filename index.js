@@ -6640,6 +6640,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 }
 
+                const k = keyOf(guildId, userId);  // ←これ追加
+
                 const postId = interaction.values?.[0];
                 if (!postId || postId === 'none') {
                     return interaction.reply({
