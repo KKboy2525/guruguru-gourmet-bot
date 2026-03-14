@@ -5412,6 +5412,24 @@ client.on(Events.InteractionCreate, async interaction => {
             return;
         }
 
+        if (id.startsWith('home:back:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+            }
+
+            await interaction.update({
+                content: '',
+                embeds: [homeEmbed()],
+                components: homeComponents(),
+            });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
         // Search panel
         if (id.startsWith('search:setUser:')) {
             const [, , gid, ownerId] = id.split(':');
@@ -5655,16 +5673,6 @@ client.on(Events.InteractionCreate, async interaction => {
             return interaction.update({ embeds: [searchPanelEmbed(st)], components: searchPanelComponents(guildId, userId, st) });
         }
 
-        if (id.startsWith('search:back:')) {
-            const [, , gid, ownerId] = id.split(':');
-            if (interaction.guildId !== gid) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
-            if (userId !== ownerId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
-
-            await interaction.update({ embeds: [homeEmbed()], components: homeComponents() });
-            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
-            return;
-        }
-
         if (id.startsWith('search:run:')) {
             const [, , gid, ownerId] = id.split(':');
             if (interaction.guildId !== gid) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
@@ -5690,6 +5698,9 @@ client.on(Events.InteractionCreate, async interaction => {
             const results = [];
 
             for (const p of merged.values()) {
+                // 検索結果には非公開投稿を出さない（投稿者本人でも除外）
+                if (p.visibility === 'private') continue;
+
                 if (!canViewPost({
                     viewerDiscordUserId: userId,
                     viewerDiscordGuildId: guildId,
@@ -6363,6 +6374,38 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await interaction.deferUpdate();
             await renderMineList(interaction, guildId, userId, { update: true });
+            await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
+            return;
+        }
+
+        if (id.startsWith('search:back:')) {
+            const [, , gid, ownerId] = id.split(':');
+            if (interaction.guildId !== gid) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'ギルド不一致です' });
+            }
+            if (userId !== ownerId) {
+                return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'これはあなたの操作ではありません' });
+            }
+
+            const st = searchState.get(k) ?? {
+                userIdFilter: null,
+                prefectureFilters: [],
+                tagFilters: [],
+                keyword: '',
+                ratingFilters: [],
+                results: [],
+                page: 0,
+            };
+
+            if (!st.results?.length) {
+                return interaction.update({
+                    content: '',
+                    embeds: [searchPanelEmbed(st)],
+                    components: searchPanelComponents(guildId, userId, st),
+                });
+            }
+
+            await renderSearchResultList(interaction, guildId, userId, { update: true });
             await clearOtherUiMessages(interaction, guildId, userId, interaction.message.id);
             return;
         }
