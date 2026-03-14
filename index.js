@@ -6638,10 +6638,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     return interaction.reply({ flags: MessageFlags.Ephemeral, content: '選択が不正です' });
                 }
 
-                const st = mineState.get(k);
-                const ownPosts = Array.isArray(st?.posts) ? st.posts : [];
-                const postMap = new Map(ownPosts.map(p => [p.id, p]));
-                const post = postMap.get(postId) ?? await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: false });
+                await ensureViewerCachesLoaded(interaction.guild, userId);
+                const post = await getPostByIdForViewer(postId, guildId, userId, { forceRefresh: true });
 
                 if (!post) {
                     return interaction.update({
